@@ -106,7 +106,9 @@ object TemplateKeyRegistry {
         WorkflowType.ITI_INPAINTING to setOf("positive_text", "image"),
         WorkflowType.ITI_EDITING to setOf("positive_text", "image"),
         WorkflowType.TTV to setOf("positive_text"),
-        WorkflowType.ITV to setOf("positive_text", "image")
+        WorkflowType.ITV to setOf("positive_text", "image"),
+        WorkflowType.REF2I to setOf("positive_text", "width", "height"),
+        WorkflowType.REF2V to setOf("positive_text", "width", "height")
     )
 
     /**
@@ -134,7 +136,9 @@ object TemplateKeyRegistry {
         WorkflowType.ITI_INPAINTING to UNIVERSAL_OPTIONAL_KEYS,
         WorkflowType.ITI_EDITING to UNIVERSAL_OPTIONAL_KEYS,
         WorkflowType.TTV to UNIVERSAL_OPTIONAL_KEYS,
-        WorkflowType.ITV to UNIVERSAL_OPTIONAL_KEYS
+        WorkflowType.ITV to UNIVERSAL_OPTIONAL_KEYS,
+        WorkflowType.REF2I to UNIVERSAL_OPTIONAL_KEYS - setOf("width", "height", "image", "image_filename"),
+        WorkflowType.REF2V to UNIVERSAL_OPTIONAL_KEYS - setOf("width", "height", "image", "image_filename")
     )
 
     /**
@@ -185,6 +189,12 @@ object TemplateKeyRegistry {
      * Returns the placeholder name itself if no mapping exists.
      */
     fun getJsonKeyForPlaceholder(placeholder: String): String {
+        ReferenceWorkflowSupport.parseKey(placeholder)?.let { (kind, _) ->
+            return when (kind) {
+                ReferenceMediaKind.IMAGE -> "image"
+                ReferenceMediaKind.VIDEO -> "video"
+            }
+        }
         return PLACEHOLDER_TO_KEY[placeholder] ?: placeholder
     }
 
@@ -192,13 +202,21 @@ object TemplateKeyRegistry {
      * Check if an input key is a known template key
      */
     fun isTemplateKey(key: String): Boolean {
-        return key in ALL_TEMPLATE_KEYS
+        return key in ALL_TEMPLATE_KEYS || ReferenceWorkflowSupport.parseKey(key) != null
     }
 
     /**
-     * Check if an input key is known for a specific workflow type (required or optional)
+     * Check if an input key is known for a specific workflow type (required or optional).
      */
     fun isTemplateKeyForType(key: String, type: WorkflowType): Boolean {
+        val referenceKind = ReferenceWorkflowSupport.parseKey(key)?.first
+        if (referenceKind != null) {
+            return when (type) {
+                WorkflowType.REF2I -> referenceKind == ReferenceMediaKind.IMAGE
+                WorkflowType.REF2V -> true
+                else -> false
+            }
+        }
         return key in (ALL_KEYS_BY_TYPE[type] ?: emptySet())
     }
 
@@ -215,6 +233,7 @@ object TemplateKeyRegistry {
      * Example: getPlaceholderForKey("text") returns "positive_prompt"
      */
     fun getPlaceholderForKey(key: String): String {
+        if (ReferenceWorkflowSupport.parseKey(key) != null) return key
         return KEY_TO_PLACEHOLDER[key] ?: key
     }
 
@@ -294,6 +313,12 @@ object TemplateKeyRegistry {
      * @return true if the input key corresponds to this field
      */
     fun doesInputKeyMatchField(fieldKey: String, inputKey: String): Boolean {
+        ReferenceWorkflowSupport.parseKey(fieldKey)?.let { (kind, _) ->
+            return when (kind) {
+                ReferenceMediaKind.IMAGE -> inputKey == "image"
+                ReferenceMediaKind.VIDEO -> inputKey == "video" || inputKey == "file"
+            }
+        }
         val expectedJsonKey = getJsonKeyForPlaceholder(fieldKey)
         // Check primary key match
         if (inputKey == expectedJsonKey) return true
@@ -311,14 +336,25 @@ object TemplateKeyRegistry {
      * @return true if the value matches the expected placeholder pattern
      */
     fun doesValueMatchPlaceholder(fieldKey: String, inputValue: Any?): Boolean {
-        // For highnoise/lownoise variants, we need to check the specific placeholder
-        // to distinguish between them (both map to the same JSON key like "unet_name")
+        ReferenceWorkflowSupport.parseKey(fieldKey)?.let { (kind, index) ->
+            val value = inputValue?.toString() ?: return true
+            val placeholders = Regex("\\{\\{reference_(?:image|video)_\\d+}}")
+                .findAll(value)
+                .map { it.value }
+                .toList()
+            if (placeholders.isNotEmpty()) {
+                val expected = "{{reference_${if (kind == ReferenceMediaKind.IMAGE) "image" else "video"}_$index}}"
+                return placeholders.all { it == expected }
+            }
+            return true
+        }
+        // For highnoise/lownoise variants, verifies the specific placeholder.
         return when {
             fieldKey.startsWith("highnoise_") || fieldKey.startsWith("lownoise_") -> {
                 val placeholderPattern = "{{$fieldKey}}"
                 inputValue?.toString()?.contains(placeholderPattern) ?: false
             }
-            // For all other fields, accept any node with the correct JSON input key
+            // For all other fields, accept any node with the correct JSON input key.
             else -> true
         }
     }

@@ -6,6 +6,8 @@ import androidx.compose.runtime.Stable
 import sh.hnet.comfychair.model.LoraSelection
 import sh.hnet.comfychair.ui.components.shared.WorkflowItemBase
 import sh.hnet.comfychair.viewmodel.ImageToImageMode
+import sh.hnet.comfychair.model.ReferenceMediaSelection
+import sh.hnet.comfychair.workflow.ReferenceMediaKind
 
 /**
  * Unified configuration for the ConfigBottomSheetContent composable.
@@ -18,7 +20,20 @@ data class BottomSheetConfig(
     val itiConfig: ItiConfig? = null,
     val models: ModelConfig,
     val parameters: ParameterConfig,
-    val lora: LoraConfig
+    val lora: LoraConfig,
+    val referenceConfig: ReferenceConfig? = null
+)
+
+data class ReferenceConfig(
+    val images: List<ReferenceMediaSelection>,
+    val videos: List<ReferenceMediaSelection>,
+    val imageCapacity: Int,
+    val videoCapacity: Int,
+    val allowVideos: Boolean,
+    val enabled: Boolean,
+    val onAdd: (ReferenceMediaKind, List<Uri>) -> Unit,
+    val onReplace: (ReferenceMediaKind, Int, Uri) -> Unit,
+    val onRemove: (ReferenceMediaKind, Int) -> Unit
 )
 
 /**

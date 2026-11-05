@@ -45,6 +45,7 @@ import sh.hnet.comfychair.workflow.OutputSlot
 import sh.hnet.comfychair.workflow.SlotPosition
 import sh.hnet.comfychair.workflow.WorkflowEdge
 import sh.hnet.comfychair.workflow.WorkflowEditorUiState
+import sh.hnet.comfychair.workflow.ReferenceWorkflowSupport
 import sh.hnet.comfychair.workflow.WorkflowGraph
 import sh.hnet.comfychair.workflow.WorkflowGroup
 import sh.hnet.comfychair.workflow.WorkflowLayoutEngine
@@ -459,25 +460,28 @@ class WorkflowEditorViewModel : ViewModel() {
         val state = _uiState.value
         val mappingState = state.mappingState ?: return
 
-        // Get the node being selected
         val targetField = mappingState.fieldMappings.find { it.field.fieldKey == fieldKey }
-        val selectedNodeId = targetField?.candidates?.getOrNull(candidateIndex)?.nodeId
+        val selectedCandidate = targetField?.candidates?.getOrNull(candidateIndex)
+        val selectedNodeId = selectedCandidate?.nodeId
+        // Get the node being selected
+        val candidateInputKey = selectedCandidate?.inputKey
+        // A loader filename may feed exactly one numbered reference slot.
 
         val updatedMappings = mappingState.fieldMappings.map { fieldMapping ->
             when {
-                // Update the target field with new selection
-                fieldMapping.field.fieldKey == fieldKey -> {
-                    fieldMapping.copy(selectedCandidateIndex = candidateIndex)
-                }
-                // Clear other field if it had this same node selected (set to -1 = unmapped)
-                selectedNodeId != null &&
-                fieldMapping.selectedCandidate?.nodeId == selectedNodeId -> {
-                    fieldMapping.copy(selectedCandidateIndex = -1)
-                }
+                fieldMapping.field.fieldKey == fieldKey -> fieldMapping.copy(selectedCandidateIndex = candidateIndex)
+                // A loader filename may feed one numbered reference slot only.
+                selectedNodeId != null && ReferenceWorkflowSupport.parseKey(fieldKey) != null &&
+                    ReferenceWorkflowSupport.parseKey(fieldMapping.field.fieldKey) != null &&
+                    fieldMapping.selectedCandidate?.let {
+                        it.nodeId == selectedNodeId && it.inputKey == candidateInputKey
+                    } == true -> fieldMapping.copy(selectedCandidateIndex = -1)
+                // Preserve the existing one-node/one-field behavior for non-reference mappings.
+                selectedNodeId != null && ReferenceWorkflowSupport.parseKey(fieldKey) == null &&
+                    fieldMapping.selectedCandidate?.nodeId == selectedNodeId -> fieldMapping.copy(selectedCandidateIndex = -1)
                 else -> fieldMapping
             }
         }
-
         val newMappingState = mappingState.copy(fieldMappings = updatedMappings)
 
         _uiState.value = _uiState.value.copy(
@@ -918,8 +922,8 @@ class WorkflowEditorViewModel : ViewModel() {
 
                 // Check if all REQUIRED fields can be mapped (optional fields can be unmapped)
                 if (!mappingState.allRequiredFieldsMapped) {
-                    val unmappedFieldNames = mappingState.unmappedRequiredFields.map { it.displayName }
-                    DebugLogger.w(TAG, "proceedWithSave: Unmapped required fields: $unmappedFieldNames")
+                    val unmappedFieldNames = mappingState.unmappedRequiredFields.map { it.displayName } +
+                        if (!mappingState.hasValidReferenceMediaMapping) listOf(context.getString(R.string.reference_media_mapping_required)) else emptyList()
                     _uiState.value = _uiState.value.copy(
                         isSaveValidating = false,
                         showMissingFieldsDialog = true,
@@ -1024,8 +1028,8 @@ class WorkflowEditorViewModel : ViewModel() {
 
                 // Check if all REQUIRED fields can be mapped (optional fields can be unmapped)
                 if (!mappingState.allRequiredFieldsMapped) {
-                    val unmappedFieldNames = mappingState.unmappedRequiredFields.map { it.displayName }
-                    DebugLogger.w(TAG, "proceedWithEditExistingSave: Unmapped required fields: $unmappedFieldNames")
+                    val unmappedFieldNames = mappingState.unmappedRequiredFields.map { it.displayName } +
+                        if (!mappingState.hasValidReferenceMediaMapping) listOf(context.getString(R.string.reference_media_mapping_required)) else emptyList()
                     _uiState.value = _uiState.value.copy(
                         isSaveValidating = false,
                         showMissingFieldsDialog = true,
@@ -1087,7 +1091,17 @@ class WorkflowEditorViewModel : ViewModel() {
             return
         }
 
-        DebugLogger.d(TAG, "confirmMappingAndSave: Saving '${pending.name}' as ${pending.type}, editingWorkflowId=${state.editingWorkflowId}")
+        if (!mappingState.allRequiredFieldsMapped) {
+            if (state.isFieldMappingMode) {
+                _uiState.value = state.copy(
+                    canConfirmMapping = false,
+                    showMissingFieldsDialog = true,
+                    missingFields = mappingState.unmappedRequiredFields.map { it.displayName } +
+                        if (!mappingState.hasValidReferenceMediaMapping) listOf(context.getString(R.string.reference_media_mapping_required)) else emptyList()
+                )
+            }
+            return
+        }
 
         // Convert mappings to the format expected by WorkflowManager
         val fieldMappings = mutableMapOf<String, Pair<String, String>>()

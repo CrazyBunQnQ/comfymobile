@@ -106,7 +106,9 @@ private val MODES = listOf(
     ModeEntry(MainRoute.TextToImage, "T2I", R.drawable.text_to_image_24px, R.string.nav_text_to_image),
     ModeEntry(MainRoute.ImageToImage, "I2I", R.drawable.image_to_image_24px, R.string.nav_image_to_image),
     ModeEntry(MainRoute.TextToVideo, "T2V", R.drawable.text_to_video_24px, R.string.nav_text_to_video),
-    ModeEntry(MainRoute.ImageToVideo, "I2V", R.drawable.image_to_video_24px, R.string.nav_image_to_video)
+    ModeEntry(MainRoute.ImageToVideo, "I2V", R.drawable.image_to_video_24px, R.string.nav_image_to_video),
+    ModeEntry(MainRoute.ReferenceToImage, "REF2I", R.drawable.image_to_image_24px, R.string.nav_reference_to_image),
+    ModeEntry(MainRoute.ReferenceToVideo, "REF2V", R.drawable.text_to_video_24px, R.string.nav_reference_to_video)
 )
 
 /** Compact "✦ T2I ▼" button that switches generation mode. */
@@ -155,6 +157,7 @@ fun ModeTabs(modifier: Modifier = Modifier) {
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .horizontalScroll(rememberScrollState())
             .padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
@@ -164,7 +167,7 @@ fun ModeTabs(modifier: Modifier = Modifier) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
                 modifier = Modifier
-                    .weight(1f)
+                    .width(88.dp)
                     .height(34.dp)
                     .clip(RoundedCornerShape(9.dp))
                     .background(if (on) Brand.BlueSoft else Color.Transparent)

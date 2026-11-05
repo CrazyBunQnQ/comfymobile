@@ -82,6 +82,7 @@ fun ConfigBottomSheetContent(
             // 4. Workflow Dropdown
             WorkflowSection(config.workflow)
             Spacer(modifier = Modifier.height(4.dp))
+            config.referenceConfig?.let { sh.hnet.comfychair.ui.components.shared.ReferenceSlotsSection(it) }
 
             // 5. Model Selection Section
             ModelSelectionSection(config.models)

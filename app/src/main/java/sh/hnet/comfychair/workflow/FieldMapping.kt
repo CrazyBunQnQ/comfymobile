@@ -61,10 +61,31 @@ data class WorkflowMappingState(
     val workflowType: WorkflowType,
     val fieldMappings: List<FieldMappingState>
 ) {
-    /** True if all REQUIRED fields are mapped (ignores optional fields) */
+    /** True if required fields and the reference-media collection rule are satisfied. */
     val allRequiredFieldsMapped: Boolean
-        get() = fieldMappings.filter { it.isRequiredField }.all { it.isMapped }
+        get() = fieldMappings.filter { it.isRequiredField }.all { it.isMapped } && hasValidReferenceMediaMapping
 
+    /** Numbered media slots are individually optional; a reference workflow still needs usable media. */
+    val hasValidReferenceMediaMapping: Boolean
+        get() {
+            val mediaMappings = fieldMappings.filter {
+                ReferenceWorkflowSupport.parseKey(it.field.fieldKey) != null
+            }
+            if (mediaMappings.isEmpty()) return !ReferenceWorkflowSupport.isReferenceType(workflowType)
+
+            val selectedInputs = mediaMappings.mapNotNull { mapping ->
+                mapping.selectedCandidate?.let { it.nodeId to it.inputKey }
+            }
+            if (selectedInputs.size != selectedInputs.distinct().size) return false
+
+            return when (workflowType) {
+                WorkflowType.REF2I -> mediaMappings.any {
+                    ReferenceWorkflowSupport.parseKey(it.field.fieldKey)?.first == ReferenceMediaKind.IMAGE && it.isMapped
+                }
+                WorkflowType.REF2V -> mediaMappings.any { it.isMapped }
+                else -> true
+            }
+        }
     /** True if ALL fields (required AND optional) are mapped */
     val allFieldsMapped: Boolean
         get() = fieldMappings.all { it.isMapped }
@@ -294,19 +315,41 @@ object FieldDisplayRegistry {
      * Get the string resource ID for a field's display name.
      * Returns null if no mapping exists.
      */
-    fun getDisplayNameResId(fieldKey: String): Int? = FIELD_RES_IDS[fieldKey]?.first
+    fun getDisplayNameResId(fieldKey: String): Int? {
+        return when (ReferenceWorkflowSupport.parseKey(fieldKey)?.first) {
+            ReferenceMediaKind.IMAGE -> R.string.reference_image_slot
+            ReferenceMediaKind.VIDEO -> R.string.reference_video_slot
+            null -> FIELD_RES_IDS[fieldKey]?.first
+        }
+    }
 
     /**
      * Get the string resource ID for a field's description.
      * Returns null if no mapping exists.
      */
-    fun getDescriptionResId(fieldKey: String): Int? = FIELD_RES_IDS[fieldKey]?.second
+    fun getDescriptionResId(fieldKey: String): Int? {
+        return if (ReferenceWorkflowSupport.parseKey(fieldKey) != null) {
+            R.string.field_desc_reference_slot
+        } else {
+            FIELD_RES_IDS[fieldKey]?.second
+        }
+    }
 
     /**
      * Get the display name for a field using Context.
      * Falls back to formatting the field key if no mapping exists.
      */
     fun getDisplayName(context: Context, fieldKey: String): String {
+        val indexedMedia = ReferenceWorkflowSupport.parseKey(fieldKey)
+        if (indexedMedia != null) {
+            val (kind, index) = indexedMedia
+            val resId = if (kind == ReferenceMediaKind.IMAGE) {
+                R.string.reference_image_slot
+            } else {
+                R.string.reference_video_slot
+            }
+            return context.getString(resId, index)
+        }
         val resId = getDisplayNameResId(fieldKey)
         return if (resId != null) {
             context.getString(resId)
@@ -321,6 +364,10 @@ object FieldDisplayRegistry {
      * Falls back to a generic description if no mapping exists.
      */
     fun getDescription(context: Context, fieldKey: String): String {
+        val indexedMedia = ReferenceWorkflowSupport.parseKey(fieldKey)
+        if (indexedMedia != null) {
+            return context.getString(R.string.field_desc_reference_slot)
+        }
         val resId = getDescriptionResId(fieldKey)
         return if (resId != null) {
             context.getString(resId)

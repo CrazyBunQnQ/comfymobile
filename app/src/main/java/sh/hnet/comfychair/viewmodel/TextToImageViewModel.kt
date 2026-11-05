@@ -28,6 +28,7 @@ import sh.hnet.comfychair.ui.components.shared.WorkflowItemBase
 import sh.hnet.comfychair.util.DebugLogger
 import sh.hnet.comfychair.util.LoraChainManager
 import sh.hnet.comfychair.util.Obfuscator
+import sh.hnet.comfychair.util.HistoryMediaSelector
 import sh.hnet.comfychair.util.SeasonalPrompts
 import sh.hnet.comfychair.util.ValidationUtils
 import sh.hnet.comfychair.viewmodel.base.BaseGenerationViewModel
@@ -814,34 +815,29 @@ class TextToImageViewModel : BaseGenerationViewModel<TextToImageUiState, TextToI
                     val promptData = historyJson.optJSONObject(promptId)
                     val outputs = promptData?.optJSONObject("outputs")
 
-                    outputs?.keys()?.forEach { nodeId ->
-                        val nodeOutput = outputs.getJSONObject(nodeId)
-                        val images = nodeOutput.optJSONArray("images")
+                    val selected = HistoryMediaSelector.select(outputs, preferVideo = false)
+                    if (selected != null) {
+                        val filename = selected.filename
+                        val subfolder = selected.subfolder
+                        val type = selected.type
 
-                        if (images != null && images.length() > 0) {
-                            val imageInfo = images.getJSONObject(0)
-                            val filename = imageInfo.optString("filename")
-                            val subfolder = imageInfo.optString("subfolder", "")
-                            val type = imageInfo.optString("type", "output")
-
-                            client.fetchImage(filename, subfolder, type) { bitmap, failureType ->
-                                viewModelScope.launch {
-                                    _uiState.update { it.copy(isFetching = false) }
-                                    if (bitmap != null) {
-                                        setCurrentImage(bitmap, filename, subfolder, type)
-                                        onComplete(true)
-                                    } else if (failureType == ConnectionFailure.STALLED) {
-                                        applicationContext?.let { ctx ->
-                                            ConnectionManager.showConnectionAlert(ctx, failureType)
-                                        }
-                                        onComplete(false)
-                                    } else {
-                                        onComplete(false)
+                        client.fetchImage(filename, subfolder, type) { bitmap, failureType ->
+                            viewModelScope.launch {
+                                _uiState.update { it.copy(isFetching = false) }
+                                if (bitmap != null) {
+                                    setCurrentImage(bitmap, filename, subfolder, type)
+                                    onComplete(true)
+                                } else if (failureType == ConnectionFailure.STALLED) {
+                                    applicationContext?.let { ctx ->
+                                        ConnectionManager.showConnectionAlert(ctx, failureType)
                                     }
+                                    onComplete(false)
+                                } else {
+                                    onComplete(false)
                                 }
                             }
-                            return@fetchHistory
                         }
+                        return@fetchHistory
                     }
                     _uiState.update { it.copy(isFetching = false) }
                     onComplete(false)

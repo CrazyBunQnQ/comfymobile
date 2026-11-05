@@ -43,6 +43,9 @@ google-services.json
 # Claude Code
 .claude/
 CLAUDE.md
+.codegraph
 
 # VSCodium
 .vscode/
+
+

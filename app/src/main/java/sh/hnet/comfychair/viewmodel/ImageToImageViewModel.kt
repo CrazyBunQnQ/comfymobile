@@ -30,6 +30,7 @@ import sh.hnet.comfychair.model.WorkflowValues
 import sh.hnet.comfychair.storage.AppSettings
 import sh.hnet.comfychair.ui.components.shared.WorkflowItemBase
 import sh.hnet.comfychair.util.DebugLogger
+import sh.hnet.comfychair.util.HistoryMediaSelector
 import sh.hnet.comfychair.util.LoraChainManager
 import sh.hnet.comfychair.util.Obfuscator
 import sh.hnet.comfychair.util.SeasonalPrompts
@@ -2098,42 +2099,36 @@ class ImageToImageViewModel : BaseGenerationViewModel<ImageToImageUiState, Image
                 return@fetchHistory
             }
 
-            // Find image in outputs
-            val outputKeys = outputs.keys()
-            while (outputKeys.hasNext()) {
-                val nodeId = outputKeys.next()
-                val nodeOutput = outputs.optJSONObject(nodeId)
-                val images = nodeOutput?.optJSONArray("images")
+            // Find the produced image. ComfyUI echoes input files back into the outputs
+            // object, so the generated file is identified by its "output" type.
+            val selected = HistoryMediaSelector.select(outputs, preferVideo = false)
+            if (selected != null) {
+                val filename = selected.filename
+                val subfolder = selected.subfolder
+                val type = selected.type
 
-                if (images != null && images.length() > 0) {
-                    val imageInfo = images.optJSONObject(0)
-                    val filename = imageInfo?.optString("filename") ?: continue
-                    val subfolder = imageInfo.optString("subfolder", "")
-                    val type = imageInfo.optString("type", "output")
+                client.fetchImage(filename, subfolder, type) { bitmap, failureType ->
+                    _uiState.update { it.copy(isFetching = false) }
+                    if (bitmap != null) {
+                        // Store in cache (memory or disk based on mode)
+                        MediaStateHolder.putBitmap(MediaStateHolder.MediaKey.ItiPreview, bitmap, context)
 
-                    client.fetchImage(filename, subfolder, type) { bitmap, failureType ->
-                        _uiState.update { it.copy(isFetching = false) }
-                        if (bitmap != null) {
-                            // Store in cache (memory or disk based on mode)
-                            MediaStateHolder.putBitmap(MediaStateHolder.MediaKey.ItiPreview, bitmap, context)
-
-                            _uiState.value = _uiState.value.copy(
-                                previewImage = bitmap,
-                                previewImageFilename = filename,
-                                previewImageSubfolder = subfolder,
-                                previewImageType = type,
-                                viewMode = ImageToImageViewMode.PREVIEW
-                            )
-                            onComplete(true)
-                        } else if (failureType == ConnectionFailure.STALLED) {
-                            ConnectionManager.showConnectionAlert(context, failureType)
-                            onComplete(false)
-                        } else {
-                            onComplete(false)
-                        }
+                        _uiState.value = _uiState.value.copy(
+                            previewImage = bitmap,
+                            previewImageFilename = filename,
+                            previewImageSubfolder = subfolder,
+                            previewImageType = type,
+                            viewMode = ImageToImageViewMode.PREVIEW
+                        )
+                        onComplete(true)
+                    } else if (failureType == ConnectionFailure.STALLED) {
+                        ConnectionManager.showConnectionAlert(context, failureType)
+                        onComplete(false)
+                    } else {
+                        onComplete(false)
                     }
-                    return@fetchHistory
                 }
+                return@fetchHistory
             }
 
             _uiState.update { it.copy(isFetching = false) }

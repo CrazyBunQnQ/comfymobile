@@ -63,6 +63,13 @@ ComfyMobile is a fork of [ComfyChair](https://github.com/legal-hkr/comfychair) b
   - High Noise / Low Noise UNET and LoRA model selection
   - Live preview during generation
 
+- **Reference to Image (REF2I)** and **Reference to Video (REF2V)**:
+  - Separate generation modes with ordered reference images; REF2V also accepts reference videos
+  - Output width and height are independent of reference media dimensions
+  - Capacity comes from the workflow's mapped loaders, not a fixed model-specific limit
+  - Reference video files are streamed to ComfyUI's `/upload/image` endpoint with their original media MIME type
+  - Per-server, per-workflow settings retain document URIs, not uploaded filenames or media bytes; unreadable documents must be replaced or removed
+
 ### Media
 
 - **Media viewer**:
@@ -130,9 +137,17 @@ ComfyMobile is a fork of [ComfyChair](https://github.com/legal-hkr/comfychair) b
     - ComfyMobile JSON (import/export) - preserves field mappings and app settings
   - Dynamic workflow thumbnails showing mini graph previews
   - Context menus for edit, rename, duplicate, export, and delete
-  - Flexible field mapping: only Positive Prompt required (plus source image for image workflows)
+  - Flexible field mapping: Positive Prompt required; source-image modes also require a source image, and reference modes require independent output dimensions and compatible media bindings
   - Dynamic parameter constraints based on workflow node definitions
   - Per-workflow generation settings persistence
+  - Reference workflows require Positive Prompt plus independent output Width and Height mappings and at least one compatible reference loader
+  - Numbered reference fields use `{{reference_image_1}}`, `{{reference_image_2}}`, etc., and `{{reference_video_1}}`, etc.; each kind is numbered consecutively from 1
+  - Supported reference loaders: `LoadImage.image`, `VHS_LoadVideo.video`, and native `LoadVideo.file` followed by `GetVideoComponents`
+  - Add and connect loaders in the graph editor before mapping more references. Unfilled reference slots are pruned for submission; pruning a shared required chain is rejected
+  - For REF2I, connect an independent output latent rather than the reference encoder's image-sized latent. REF2V output dimensions map to the generation consumer, not reference preprocessing
+  - Import supports named/object widgets, exposed subgraph widgets, and flat dotted dynamic input keys. The app does not create or repair model-specific generation chains
+  - Import and graph editing share prompt-candidate tracing, including conditioning consumers with a `prompt` input instead of a text-encoder class name
+  - Configuration backups retain reference URI lists but do not include source media or URI permission grants; restoring on another device may require selecting the files again
   - Workflow Editor returns to view mode after saving for continued editing
 
 ### Configuration

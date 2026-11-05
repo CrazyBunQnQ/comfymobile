@@ -32,7 +32,6 @@
         <activity
             android:name=".MainContainerActivity"
             android:exported="false"
-            android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize" />
 
         <!-- SettingsContainerActivity - Container for settings fragments -->

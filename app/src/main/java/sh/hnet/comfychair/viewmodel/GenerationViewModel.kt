@@ -27,6 +27,7 @@ import sh.hnet.comfychair.connection.WebSocketState
 import sh.hnet.comfychair.queue.JobRegistry
 import sh.hnet.comfychair.storage.AppSettings
 import sh.hnet.comfychair.util.DebugLogger
+import sh.hnet.comfychair.util.HistoryMediaSelector
 import sh.hnet.comfychair.util.Obfuscator
 
 /**
@@ -505,31 +506,37 @@ class GenerationViewModel : ViewModel() {
             DebugLogger.w(TAG, "Cannot fetch immediately: no context")
             return
         }
+        val expectedServerId = ConnectionManager.currentServerId ?: run {
+            DebugLogger.w(TAG, "Cannot fetch immediately: no active server")
+            return
+        }
 
         when (event) {
             is GenerationEvent.ImageGenerated -> {
                 val mediaKey = when (ownerId) {
                     "TEXT_TO_IMAGE" -> MediaStateHolder.MediaKey.TtiPreview
                     "IMAGE_TO_IMAGE" -> MediaStateHolder.MediaKey.ItiPreview
+                    "ref2i" -> MediaStateHolder.MediaKey.Ref2iPreview
                     else -> {
                         DebugLogger.w(TAG, "Unknown image owner: $ownerId")
                         return
                     }
                 }
                 DebugLogger.i(TAG, "Fetching image immediately for $ownerId (promptId=${Obfuscator.promptId(event.promptId)})")
-                fetchAndStoreImage(client, context, event.promptId, mediaKey)
+                fetchAndStoreImage(client, context, event.promptId, mediaKey, expectedServerId)
             }
             is GenerationEvent.VideoGenerated -> {
                 val filePrefix = when (ownerId) {
                     "TEXT_TO_VIDEO" -> VideoUtils.FilePrefix.TEXT_TO_VIDEO
                     "IMAGE_TO_VIDEO" -> VideoUtils.FilePrefix.IMAGE_TO_VIDEO
+                    "ref2v" -> VideoUtils.FilePrefix.REFERENCE_TO_VIDEO
                     else -> {
                         DebugLogger.w(TAG, "Unknown video owner: $ownerId")
                         return
                     }
                 }
                 DebugLogger.i(TAG, "Fetching video immediately for $ownerId (promptId=${Obfuscator.promptId(event.promptId)})")
-                VideoUtils.fetchVideoFromHistory(context, client, event.promptId, filePrefix) { uri ->
+                VideoUtils.fetchVideoFromHistory(context, client, event.promptId, filePrefix, expectedServerId) { uri ->
                     if (uri != null) {
                         DebugLogger.i(TAG, "Immediate video fetch successful for $ownerId")
                     } else {
@@ -548,7 +555,8 @@ class GenerationViewModel : ViewModel() {
         client: ComfyUIClient,
         context: Context,
         promptId: String,
-        mediaKey: MediaStateHolder.MediaKey
+        mediaKey: MediaStateHolder.MediaKey,
+        expectedServerId: String
     ) {
         client.fetchHistory(promptId) { historyJson ->
             if (historyJson != null) {
@@ -556,29 +564,24 @@ class GenerationViewModel : ViewModel() {
                     val promptData = historyJson.optJSONObject(promptId)
                     val outputs = promptData?.optJSONObject("outputs")
 
-                    outputs?.keys()?.forEach { nodeId ->
-                        val nodeOutput = outputs.getJSONObject(nodeId)
-                        val images = nodeOutput.optJSONArray("images")
-
-                        if (images != null && images.length() > 0) {
-                            val imageInfo = images.getJSONObject(0)
-                            val filename = imageInfo.optString("filename")
-                            val subfolder = imageInfo.optString("subfolder", "")
-                            val type = imageInfo.optString("type", "output")
-
-                            client.fetchImage(filename, subfolder, type) { bitmap, failureType ->
-                                if (bitmap != null) {
+                    val selected = HistoryMediaSelector.select(outputs, preferVideo = false)
+                    if (selected != null) {
+                        client.fetchImage(selected.filename, selected.subfolder, selected.type) { bitmap, failureType ->
+                            if (bitmap != null) {
+                                if (ConnectionManager.currentServerId == expectedServerId && MediaStateHolder.getCurrentServerId() == expectedServerId) {
                                     MediaStateHolder.putBitmap(mediaKey, bitmap, context)
                                     DebugLogger.i(TAG, "Immediate image fetch successful, stored to ${mediaKey::class.simpleName}")
-                                } else if (failureType == ConnectionFailure.STALLED) {
-                                    DebugLogger.w(TAG, "Immediate image fetch stalled")
-                                    ConnectionManager.showConnectionAlert(context, failureType)
                                 } else {
-                                    DebugLogger.w(TAG, "Immediate image fetch failed: bitmap is null")
+                                    DebugLogger.d(TAG, "Discarding image result after server change")
                                 }
+                            } else if (failureType == ConnectionFailure.STALLED) {
+                                DebugLogger.w(TAG, "Immediate image fetch stalled")
+                                ConnectionManager.showConnectionAlert(context, failureType)
+                            } else {
+                                DebugLogger.w(TAG, "Immediate image fetch failed: bitmap is null")
                             }
-                            return@fetchHistory
                         }
+                        return@fetchHistory
                     }
                     DebugLogger.w(TAG, "Immediate image fetch: no images in history output")
                 } catch (e: Exception) {

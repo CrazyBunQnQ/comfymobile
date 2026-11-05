@@ -28,9 +28,12 @@ import sh.hnet.comfychair.workflow.WorkflowMappingState
 import sh.hnet.comfychair.connection.ConnectionManager
 import sh.hnet.comfychair.storage.AppSettings
 import sh.hnet.comfychair.util.DebugLogger
+import sh.hnet.comfychair.util.FieldMappingAnalyzer
 import sh.hnet.comfychair.util.LiteGraphConverter
 import sh.hnet.comfychair.util.ValidationUtils
 import sh.hnet.comfychair.util.WorkflowJsonAnalyzer
+import sh.hnet.comfychair.workflow.ReferenceWorkflowSupport
+import sh.hnet.comfychair.workflow.WorkflowParser
 
 /**
  * Export format options
@@ -50,6 +53,8 @@ data class WorkflowManagementUiState(
     val itiEditingWorkflows: List<WorkflowManager.Workflow> = emptyList(),
     val ttvWorkflows: List<WorkflowManager.Workflow> = emptyList(),
     val itvWorkflows: List<WorkflowManager.Workflow> = emptyList(),
+    val ref2iWorkflows: List<WorkflowManager.Workflow> = emptyList(),
+    val ref2vWorkflows: List<WorkflowManager.Workflow> = emptyList(),
 
     // Import dialog state
     val showImportDialog: Boolean = false,
@@ -165,6 +170,10 @@ class WorkflowManagementViewModel : ViewModel() {
             ttvWorkflows = WorkflowManager.getWorkflowsByType(WorkflowType.TTV)
                 .filter { showBuiltIn || !it.isBuiltIn },
             itvWorkflows = WorkflowManager.getWorkflowsByType(WorkflowType.ITV)
+                .filter { showBuiltIn || !it.isBuiltIn },
+            ref2iWorkflows = WorkflowManager.getWorkflowsByType(WorkflowType.REF2I)
+                .filter { showBuiltIn || !it.isBuiltIn },
+            ref2vWorkflows = WorkflowManager.getWorkflowsByType(WorkflowType.REF2V)
                 .filter { showBuiltIn || !it.isBuiltIn }
         )
     }
@@ -422,7 +431,8 @@ class WorkflowManagementViewModel : ViewModel() {
 
                 // Check if all REQUIRED fields are mapped (optional fields can be unmapped)
                 if (!mappingState.allRequiredFieldsMapped) {
-                    val unmappedFieldNames = mappingState.unmappedRequiredFields.map { it.displayName }
+                    val unmappedFieldNames = mappingState.unmappedRequiredFields.map { it.displayName } +
+                        if (!mappingState.hasValidReferenceMediaMapping) listOf(context.getString(R.string.reference_media_mapping_required)) else emptyList()
                     _uiState.value = _uiState.value.copy(
                         isValidatingNodes = false,
                         showMissingFieldsDialog = true,
@@ -466,12 +476,15 @@ class WorkflowManagementViewModel : ViewModel() {
         val optionalKeys = TemplateKeyRegistry.getOptionalKeysForWorkflow(type, json)
         val allKeys = strictlyRequiredKeys + optionalKeys
 
-        val nodesJson = if (json.has("nodes")) json.optJSONObject("nodes") ?: json else json
+        val graph = WorkflowParser().parse(jsonContent)
+        val referenceMappings = if (ReferenceWorkflowSupport.isReferenceType(type)) {
+            ReferenceWorkflowSupport.findCandidates(graph, type, ConnectionManager.nodeTypeRegistry)
+        } else emptyList()
 
         // For positive_text and negative_text, we need graph tracing to determine which CLIPTextEncode
         // connects to which sampler input (positive vs negative)
         val promptMappings = if (allKeys.contains("positive_text") || allKeys.contains("negative_text")) {
-            createPromptFieldMappings(nodesJson)
+            FieldMappingAnalyzer.createPromptFieldMappings(graph, ConnectionManager.nodeTypeRegistry)
         } else {
             emptyMap()
         }
@@ -488,258 +501,45 @@ class WorkflowManagementViewModel : ViewModel() {
                     selectedCandidateIndex = if (candidates.isNotEmpty()) 0 else -1
                 )
             } else {
-                val candidates = mutableListOf<FieldCandidate>()
-
-                // Get the actual JSON input key for this placeholder
-                // e.g., "highnoise_unet_name" -> "unet_name", "lownoise_lora_name" -> "lora_name"
-                val jsonInputKey = TemplateKeyRegistry.getJsonKeyForPlaceholder(fieldKey)
-
-                // Find all nodes that have this input key
-                for (nodeId in nodesJson.keys()) {
-                    val node = nodesJson.optJSONObject(nodeId) ?: continue
-                    val inputs = node.optJSONObject("inputs") ?: continue
-
-                    if (inputs.has(jsonInputKey)) {
-                        val currentValue = inputs.opt(jsonInputKey)
-
-                        if (TemplateKeyRegistry.doesValueMatchPlaceholder(fieldKey, currentValue)) {
-                            val classType = node.optString("class_type", "Unknown")
-                            val meta = node.optJSONObject("_meta")
-                            val title = meta?.optString("title") ?: classType
-
-                            candidates.add(
-                                FieldCandidate(
-                                    nodeId = nodeId,
-                                    nodeName = title,
-                                    classType = classType,
-                                    inputKey = jsonInputKey,
-                                    currentValue = currentValue
-                                )
-                            )
+                val candidates = FieldMappingAnalyzer.findCandidatesForField(
+                    fieldKey, graph, promptMappings, ConnectionManager.nodeTypeRegistry
+                ).filterNot { candidate ->
+                    ReferenceWorkflowSupport.isReferenceType(type) &&
+                        fieldKey in setOf("width", "height") &&
+                        candidate.classType in setOf("LoadImage", "VHS_LoadVideo", "LoadVideo")
+                }
+                val canvasCandidates = if (ReferenceWorkflowSupport.isReferenceType(type) &&
+                    fieldKey in setOf("width", "height")) {
+                    candidates.sortedBy { candidate ->
+                        when {
+                            candidate.classType.contains("Latent", ignoreCase = true) -> 0
+                            candidate.classType.contains("Reference", ignoreCase = true) -> 1
+                            candidate.classType.contains("QwenImage21", ignoreCase = true) -> 1
+                            candidate.classType.contains("MiniMaxH3ReferenceToVideo", ignoreCase = true) -> 1
+                            else -> 2
                         }
                     }
+                } else {
+                    candidates
                 }
 
                 FieldMappingState(
                     field = FieldDisplayRegistry.createRequiredField(context, fieldKey, isRequired),
-                    candidates = candidates,
-                    selectedCandidateIndex = if (candidates.isNotEmpty()) 0 else -1
+                    candidates = canvasCandidates,
+                    selectedCandidateIndex = if (canvasCandidates.isNotEmpty()) 0 else -1
                 )
             }
         }
 
-        return WorkflowMappingState(type, fieldMappings)
-    }
-
-    /**
-     * Create field mappings for positive_text and negative_text using graph tracing.
-     * Traces text encoding nodes to find which connects to "positive" vs "negative" sampler inputs.
-     * Supports CLIPTextEncode (with "text" input) and other encoders like TextEncodeQwenImageEditPlus (with "prompt" input).
-     */
-    private fun createPromptFieldMappings(nodesJson: JSONObject): Map<String, List<FieldCandidate>> {
-        val positiveTextCandidates = mutableListOf<FieldCandidate>()
-        val negativeTextCandidates = mutableListOf<FieldCandidate>()
-
-        // Text input keys to look for in text encoding nodes
-        val textInputKeys = listOf("text", "prompt")
-
-        // Find all text encoding nodes with text/prompt input
-        data class TextEncoderNode(val nodeId: String, val node: JSONObject, val inputKey: String)
-        val textEncoderNodes = mutableListOf<TextEncoderNode>()
-
-        for (nodeId in nodesJson.keys()) {
-            val node = nodesJson.optJSONObject(nodeId) ?: continue
-            val classType = node.optString("class_type", "")
-            val inputs = node.optJSONObject("inputs") ?: continue
-
-            // Look for nodes that have text-related inputs
-            val matchingInputKey = textInputKeys.firstOrNull { inputs.has(it) }
-            if (matchingInputKey != null) {
-                // Only include known text encoding node types
-                val isTextEncoder = classType == "CLIPTextEncode" ||
-                        classType.contains("TextEncode", ignoreCase = true) ||
-                        classType.contains("Prompt", ignoreCase = true)
-                if (isTextEncoder) {
-                    textEncoderNodes.add(TextEncoderNode(nodeId, node, matchingInputKey))
-                }
-            }
-        }
-
-        // For each text encoder, trace its output to find if it connects to positive or negative
-        for ((nodeId, node, inputKey) in textEncoderNodes) {
-            val inputs = node.optJSONObject("inputs") ?: continue
-            val meta = node.optJSONObject("_meta")
-            val classType = node.optString("class_type", "Unknown")
-            val title = meta?.optString("title") ?: classType
-            val currentValue = inputs.opt(inputKey)
-
-            // Determine if this node connects to positive or negative input
-            val connectionType = traceClipTextEncodeConnection(nodesJson, nodeId)
-
-            val candidate = FieldCandidate(
-                nodeId = nodeId,
-                nodeName = title,
-                classType = classType,
-                inputKey = inputKey,
-                currentValue = currentValue
+        val localizedReferenceMappings = referenceMappings.map { mapping ->
+            mapping.copy(
+                field = FieldDisplayRegistry.createRequiredField(context, mapping.field.fieldKey, isRequired = false)
             )
-
-            when (connectionType) {
-                "positive" -> positiveTextCandidates.add(0, candidate) // Add traced match first
-                "negative" -> negativeTextCandidates.add(0, candidate) // Add traced match first
-                else -> {
-                    // Unknown connection - use title-based classification
-                    val titleLower = title.lowercase()
-                    when {
-                        titleLower.contains("positive") -> positiveTextCandidates.add(candidate)
-                        titleLower.contains("negative") -> negativeTextCandidates.add(candidate)
-                        else -> {
-                            // Add to both as fallback candidates
-                            positiveTextCandidates.add(candidate)
-                            negativeTextCandidates.add(candidate)
-                        }
-                    }
-                }
-            }
         }
 
-        return mapOf(
-            "positive_text" to positiveTextCandidates,
-            "negative_text" to negativeTextCandidates
-        )
+        return WorkflowMappingState(type, fieldMappings + localizedReferenceMappings)
     }
 
-    /**
-     * Trace a CLIPTextEncode node's output to find what type of connection it has.
-     * Returns "positive", "negative", or null if no connection found.
-     */
-    private fun traceClipTextEncodeConnection(nodesJson: JSONObject, clipNodeId: String): String? {
-        // Search all nodes for ones that reference this CLIPTextEncode output
-        for (nodeId in nodesJson.keys()) {
-            val node = nodesJson.optJSONObject(nodeId) ?: continue
-            val classType = node.optString("class_type", "")
-            val inputs = node.optJSONObject("inputs") ?: continue
-
-            // Check KSampler and KSamplerAdvanced nodes
-            if (classType == "KSampler" || classType == "KSamplerAdvanced") {
-                // Check "positive" input
-                val positiveInput = inputs.optJSONArray("positive")
-                if (positiveInput != null && positiveInput.length() >= 1) {
-                    val refNodeId = positiveInput.optString(0, "")
-                    if (refNodeId == clipNodeId) {
-                        return "positive"
-                    }
-                }
-
-                // Check "negative" input
-                val negativeInput = inputs.optJSONArray("negative")
-                if (negativeInput != null && negativeInput.length() >= 1) {
-                    val refNodeId = negativeInput.optString(0, "")
-                    if (refNodeId == clipNodeId) {
-                        return "negative"
-                    }
-                }
-            }
-
-            // For video workflows, check conditioning nodes like WanImageToVideo
-            if (classType.contains("ImageToVideo", ignoreCase = true) ||
-                classType.contains("TextToVideo", ignoreCase = true)) {
-                val positiveInput = inputs.optJSONArray("positive")
-                if (positiveInput != null && positiveInput.length() >= 1) {
-                    val refNodeId = positiveInput.optString(0, "")
-                    if (refNodeId == clipNodeId) {
-                        return "positive"
-                    }
-                }
-
-                val negativeInput = inputs.optJSONArray("negative")
-                if (negativeInput != null && negativeInput.length() >= 1) {
-                    val refNodeId = negativeInput.optString(0, "")
-                    if (refNodeId == clipNodeId) {
-                        return "negative"
-                    }
-                }
-            }
-
-            // Check BasicGuider nodes (Flux-style single conditioning)
-            if (classType == "BasicGuider") {
-                val conditioningInput = inputs.optJSONArray("conditioning")
-                if (conditioningInput != null && conditioningInput.length() >= 1) {
-                    val refNodeId = conditioningInput.optString(0, "")
-                    if (refNodeId == clipNodeId) {
-                        return "positive"  // BasicGuider only has positive conditioning
-                    }
-                }
-            }
-        }
-
-        // If direct connection not found, check for intermediate conditioning nodes
-        // that might reference this CLIPTextEncode and connect to samplers
-        for (nodeId in nodesJson.keys()) {
-            val node = nodesJson.optJSONObject(nodeId) ?: continue
-            val inputs = node.optJSONObject("inputs") ?: continue
-
-            // Check if any input references this CLIPTextEncode
-            for (inputKey in inputs.keys()) {
-                val inputValue = inputs.optJSONArray(inputKey)
-                if (inputValue != null && inputValue.length() >= 1) {
-                    val refNodeId = inputValue.optString(0, "")
-                    if (refNodeId == clipNodeId) {
-                        // This node references our CLIPTextEncode, now trace this node's output
-                        val intermediateResult = traceIntermediateConnection(nodesJson, nodeId)
-                        if (intermediateResult != null) {
-                            return intermediateResult
-                        }
-                    }
-                }
-            }
-        }
-
-        return null
-    }
-
-    /**
-     * Trace an intermediate conditioning node to find if it connects to positive or negative.
-     */
-    private fun traceIntermediateConnection(nodesJson: JSONObject, intermediateNodeId: String): String? {
-        for (nodeId in nodesJson.keys()) {
-            val node = nodesJson.optJSONObject(nodeId) ?: continue
-            val classType = node.optString("class_type", "")
-            val inputs = node.optJSONObject("inputs") ?: continue
-
-            if (classType == "KSampler" || classType == "KSamplerAdvanced" ||
-                classType.contains("ImageToVideo", ignoreCase = true)) {
-
-                val positiveInput = inputs.optJSONArray("positive")
-                if (positiveInput != null && positiveInput.length() >= 1) {
-                    val refNodeId = positiveInput.optString(0, "")
-                    if (refNodeId == intermediateNodeId) {
-                        return "positive"
-                    }
-                }
-
-                val negativeInput = inputs.optJSONArray("negative")
-                if (negativeInput != null && negativeInput.length() >= 1) {
-                    val refNodeId = negativeInput.optString(0, "")
-                    if (refNodeId == intermediateNodeId) {
-                        return "negative"
-                    }
-                }
-            }
-
-            // Check BasicGuider nodes (Flux-style single conditioning)
-            if (classType == "BasicGuider") {
-                val conditioningInput = inputs.optJSONArray("conditioning")
-                if (conditioningInput != null && conditioningInput.length() >= 1) {
-                    val refNodeId = conditioningInput.optString(0, "")
-                    if (refNodeId == intermediateNodeId) {
-                        return "positive"  // BasicGuider only has positive conditioning
-                    }
-                }
-            }
-        }
-        return null
-    }
 
     fun cancelImport() {
         _uiState.value = _uiState.value.copy(

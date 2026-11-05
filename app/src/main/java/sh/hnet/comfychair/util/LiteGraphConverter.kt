@@ -500,21 +500,32 @@ class LiteGraphConverter(
             }
         }
 
-        // Parse subgraph node's widget values for unconnected inputs
+        // Parse exposed subgraph widget values. Proxy widgets identify values on older
+        // graphs; newer graphs expose them directly through the instance inputs.
+        val widgetValueMap = readNamedWidgetValues(subgraphNode)
         val widgetValues = subgraphNode.optJSONArray("widgets_values")
         val proxyWidgets = subgraphNode.optJSONObject("properties")?.optJSONArray("proxyWidgets")
-
-        // Build widget value map: inputName -> value
-        val widgetValueMap = mutableMapOf<String, Any>()
-        if (widgetValues != null && proxyWidgets != null) {
+        if (widgetValueMap.isEmpty() && widgetValues != null && proxyWidgets != null) {
             for (i in 0 until proxyWidgets.length()) {
                 val proxy = proxyWidgets.optJSONArray(i) ?: continue
                 val inputName = proxy.optString(1, "")
                 if (inputName.isNotEmpty() && i < widgetValues.length()) {
-                    val value = widgetValues.opt(i)
-                    if (value != null && value != JSONObject.NULL) {
-                        widgetValueMap[inputName] = value
+                    putWidgetValue(widgetValueMap, inputName, widgetValues.opt(i))
+                }
+            }
+        } else if (widgetValueMap.isEmpty() && widgetValues != null && proxyWidgets == null) {
+            val instanceInputs = subgraphNode.optJSONArray("inputs")
+            if (instanceInputs != null) {
+                var widgetIndex = 0
+                for (inputIndex in 0 until instanceInputs.length()) {
+                    val input = instanceInputs.optJSONObject(inputIndex) ?: continue
+                    if (!hasWidgetDeclaration(input)) continue
+                    val inputName = subgraphDef.inputs.getOrNull(inputIndex)?.name
+                        ?: input.optString("name", "")
+                    if (widgetIndex < widgetValues.length() && inputName.isNotEmpty()) {
+                        putWidgetValue(widgetValueMap, inputName, widgetValues.opt(widgetIndex))
                     }
+                    widgetIndex++
                 }
             }
         }
@@ -579,52 +590,40 @@ class LiteGraphConverter(
             // Build inputs map
             val inputs = JSONObject()
 
-            // 1. Map widget values from internal node
-            val internalWidgetValues = node.optJSONArray("widgets_values")
-            if (internalWidgetValues != null && nodeDef != null) {
-                mapWidgetValues(internalWidgetValues, nodeDef.inputs, inputs, nodeType, newNodeId, warnings)
-            }
+            // 1. Map widget values from internal node. Object values are read directly;
+            // array values use declared server inputs when available.
+            mapNodeWidgetValues(node, nodeDef?.inputs.orEmpty(), inputs)
 
-            // 2. Add connections from internal node's inputs array
+            // 2. Resolve subgraph ports: internal defaults < exposed widgets < connections.
             val nodeInputs = node.optJSONArray("inputs")
             if (nodeInputs != null) {
                 for (j in 0 until nodeInputs.length()) {
                     val input = nodeInputs.optJSONObject(j) ?: continue
                     val inputName = input.optString("name", "")
                     val linkId = input.optInt("link", -1)
-
                     if (inputName.isEmpty() || linkId == -1) continue
 
-                    // Find the internal link
-                    val internalLink = subgraphDef.links.find { it.id == linkId }
-                    if (internalLink != null) {
-                        if (internalLink.originId == subgraphDef.inputNodeId) {
-                            // Connection from virtual input node - resolve to external connection or widget value
-                            val slotIndex = internalLink.originSlot
-                            val subgraphInput = subgraphDef.inputs.getOrNull(slotIndex)
-
-                            // Check if there's an external connection (takes priority over widget value)
-                            val externalConn = externalInputConnections[slotIndex]
-                            if (externalConn != null) {
-                                // Use external connection
-                                val connection = JSONArray().apply {
+                    val internalLink = subgraphDef.links.find { it.id == linkId } ?: continue
+                    if (internalLink.originId == subgraphDef.inputNodeId) {
+                        val slotIndex = internalLink.originSlot
+                        val subgraphInput = subgraphDef.inputs.getOrNull(slotIndex)
+                        if (subgraphInput != null) {
+                            if (externalInputConnections.containsKey(slotIndex)) {
+                                val externalConn = externalInputConnections.getValue(slotIndex)
+                                inputs.put(inputName, JSONArray().apply {
                                     put(externalConn.first.toString())
                                     put(externalConn.second)
-                                }
-                                inputs.put(inputName, connection)
-                            } else if (subgraphInput != null && widgetValueMap.containsKey(subgraphInput.name)) {
-                                // Use widget value from subgraph node
-                                inputs.put(inputName, widgetValueMap[subgraphInput.name])
+                                })
+                            } else if (widgetValueMap.containsKey(subgraphInput.name)) {
+                                inputs.put(inputName, widgetValueMap.getValue(subgraphInput.name))
                             }
-                        } else {
-                            // Internal connection - remap source node ID
-                            val remappedSrcId = nodeIdRemap[internalLink.originId] ?: internalLink.originId
-                            val connection = JSONArray().apply {
-                                put(remappedSrcId.toString())
-                                put(internalLink.originSlot)
-                            }
-                            inputs.put(inputName, connection)
                         }
+                    } else {
+                        val remappedSrcId = nodeIdRemap[internalLink.originId] ?: internalLink.originId
+                        inputs.put(inputName, JSONArray().apply {
+                            put(remappedSrcId.toString())
+                            put(internalLink.originSlot)
+                        })
                     }
                 }
             }
@@ -719,11 +718,10 @@ class LiteGraphConverter(
         val inputs = JSONObject()
 
         // 1. Map widget values to named inputs
-        val widgetValues = node.optJSONArray("widgets_values")
-        if (widgetValues != null && nodeDef != null) {
-            mapWidgetValues(widgetValues, nodeDef.inputs, inputs, nodeType, nodeId, warnings)
-        } else if (widgetValues != null && nodeDef == null) {
-            // Unknown node - can't map widget values
+        if (hasWidgetValues(node) && nodeDef != null) {
+            mapNodeWidgetValues(node, nodeDef.inputs, inputs)
+        } else if (hasWidgetValues(node) && nodeDef == null) {
+            // Unknown node - keep the existing warning rather than guessing its inputs
             DebugLogger.w(TAG, "Node #$nodeId ($nodeType): no definition found, cannot map widget values")
             warnings.add("Node \"$nodeType\" (#$nodeId): inputs could not be fully mapped")
         }
@@ -778,47 +776,133 @@ class LiteGraphConverter(
     /**
      * Map LiteGraph widgets_values array to named inputs using node definition
      */
-    private fun mapWidgetValues(
-        widgetValues: JSONArray,
+    private fun hasWidgetValues(node: JSONObject): Boolean =
+        node.optJSONObject("widgets_values_named") != null ||
+            node.opt("widgets_values").let { it is JSONObject || it is JSONArray }
+
+    /**
+     * Resolve widget values without losing frontend input names. Named values and object values
+     * are authoritative; positional arrays use the canvas input widget order before server order.
+     */
+    private fun mapNodeWidgetValues(
+        node: JSONObject,
         inputDefs: List<InputDefinition>,
-        inputs: JSONObject,
-        nodeType: String,
-        nodeId: Int,
-        warnings: MutableList<String>
+        inputs: JSONObject
     ) {
-        // Filter to only editable inputs (not connection-only inputs)
-        val editableInputs = inputDefs.filter { !it.forceInput && !isConnectionOnlyType(it.type) }
+        val namedValues = node.optJSONObject("widgets_values_named")
+        if (namedValues != null) {
+            copyNamedWidgetValues(namedValues, inputs)
+            return
+        }
 
-        var widgetIndex = 0
-        for (inputDef in editableInputs) {
-            if (widgetIndex >= widgetValues.length()) break
+        val widgetValues = node.opt("widgets_values")
+        if (widgetValues is JSONObject) {
+            copyNamedWidgetValues(widgetValues, inputs)
+            return
+        }
+        if (widgetValues !is JSONArray) return
+        val declaredNames = widgetInputNames(node)
+        val inputNames = declaredNames ?: inputDefs.asSequence()
+            .filter { !it.forceInput && !isConnectionOnlyType(it.type) }
+            .map { it.name }
+            .toList()
+        mapWidgetArray(widgetValues, inputNames, inputs)
+    }
 
-            val value = widgetValues.opt(widgetIndex)
-
-            // Skip control widgets defined in server (rare, but handle it)
-            if (inputDef.name == "control_after_generate" ||
-                inputDef.name.startsWith("control_")) {
-                widgetIndex++
-                continue
-            }
-
-            // Map the value
-            if (value != null && value != JSONObject.NULL) {
-                inputs.put(inputDef.name, value)
-            }
-
-            widgetIndex++
-
-            // After mapping a seed input, check if next widget value is a control value
-            // (control_after_generate is frontend-only and not in server's /object_info)
-            if (inputDef.name in SEED_INPUT_NAMES && widgetIndex < widgetValues.length()) {
-                val nextValue = widgetValues.opt(widgetIndex)
-                if (nextValue is String && nextValue in CONTROL_WIDGET_VALUES) {
-                    widgetIndex++
+    private fun readNamedWidgetValues(node: JSONObject): MutableMap<String, Any> {
+        val result = mutableMapOf<String, Any>()
+        val namedValues = node.optJSONObject("widgets_values_named")
+        if (namedValues != null) {
+            copyNamedWidgetValues(namedValues, result)
+            return result
+        }
+        when (val widgetValues = node.opt("widgets_values")) {
+            is JSONObject -> copyNamedWidgetValues(widgetValues, result)
+            is JSONArray -> {
+                val declaredNames = widgetInputNames(node)
+                if (!declaredNames.isNullOrEmpty()) {
+                    val mapped = JSONObject()
+                    mapWidgetArray(widgetValues, declaredNames, mapped)
+                    copyNamedWidgetValues(mapped, result)
                 }
             }
         }
+        return result
     }
+
+    private fun copyNamedWidgetValues(source: JSONObject, target: JSONObject) {
+        val names = source.keys()
+        while (names.hasNext()) {
+            val name = names.next()
+            if (name.equals("videopreview", ignoreCase = true)) continue
+            putWidgetValue(target, name, source.opt(name))
+        }
+    }
+
+    private fun copyNamedWidgetValues(source: JSONObject, target: MutableMap<String, Any>) {
+        val names = source.keys()
+        while (names.hasNext()) {
+            val name = names.next()
+            if (name.equals("videopreview", ignoreCase = true)) continue
+            val value = source.opt(name) ?: continue
+            if (value != JSONObject.NULL && value !is JSONObject) target[name] = value
+        }
+    }
+
+    private fun putWidgetValue(target: JSONObject, name: String, value: Any?) {
+        if (name.isNotEmpty() && !name.equals("videopreview", ignoreCase = true) && isFlatWidgetValue(value)) {
+            target.put(name, value)
+        }
+    }
+
+    private fun isFlatWidgetValue(value: Any?): Boolean =
+        value != null && value != JSONObject.NULL && value !is JSONObject
+
+    private fun putWidgetValue(target: MutableMap<String, Any>, name: String, value: Any?) {
+        if (name.isNotEmpty() && !name.equals("videopreview", ignoreCase = true) &&
+            value != null && value != JSONObject.NULL && value !is JSONObject
+        ) {
+            target[name] = value
+        }
+    }
+
+    private fun widgetInputNames(node: JSONObject): List<String>? {
+        val nodeInputs = node.optJSONArray("inputs") ?: return null
+        val names = mutableListOf<String>()
+        for (i in 0 until nodeInputs.length()) {
+            val input = nodeInputs.optJSONObject(i) ?: continue
+            if (!hasWidgetDeclaration(input)) continue
+            val name = input.optString("name", "")
+            if (name.isNotEmpty()) names.add(name)
+        }
+        return names.takeIf { it.isNotEmpty() }
+    }
+
+    private fun hasWidgetDeclaration(input: JSONObject): Boolean =
+        input.has("widget") && input.opt("widget") != JSONObject.NULL
+
+    private fun mapWidgetArray(widgetValues: JSONArray, inputNames: List<String>, inputs: JSONObject) {
+        var widgetIndex = 0
+        for ((inputIndex, name) in inputNames.withIndex()) {
+            if (widgetIndex >= widgetValues.length()) break
+            val value = widgetValues.opt(widgetIndex)
+            if (name.startsWith("control_") || name.equals("videopreview", ignoreCase = true)) {
+                widgetIndex++
+                continue
+            }
+            putWidgetValue(inputs, name, value)
+            widgetIndex++
+
+            val nextIsDeclaredControl = inputNames.getOrNull(inputIndex + 1)
+                ?.startsWith("control_") == true
+            if (name in SEED_INPUT_NAMES && !nextIsDeclaredControl && widgetIndex < widgetValues.length()) {
+                val nextValue = widgetValues.opt(widgetIndex)
+                if (nextValue is String && nextValue in CONTROL_WIDGET_VALUES) widgetIndex++
+            }
+        }
+    }
+
+
 
     /**
      * Check if an input type is connection-only (not a widget)

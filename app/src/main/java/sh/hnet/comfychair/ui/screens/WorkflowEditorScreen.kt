@@ -121,6 +121,7 @@ import sh.hnet.comfychair.workflow.RenderedGroup
 import sh.hnet.comfychair.workflow.WorkflowLayoutEngine
 import sh.hnet.comfychair.workflow.WorkflowMappingState
 import sh.hnet.comfychair.workflow.WorkflowNode
+import sh.hnet.comfychair.workflow.ReferenceWorkflowSupport
 
 /**
  * Main screen for the workflow editor
@@ -1361,6 +1362,22 @@ private fun FieldMappingPanel(
                 }
             }
             Spacer(modifier = Modifier.height(4.dp))
+            if (ReferenceWorkflowSupport.isReferenceType(mappingState.workflowType)) {
+                Text(
+                    text = stringResource(R.string.reference_canvas_mapping_guidance),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 6.dp)
+                )
+            }
+            if (ReferenceWorkflowSupport.isReferenceType(mappingState.workflowType)) {
+                Text(
+                    text = stringResource(R.string.reference_media_mapping_guidance),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+            }
 
             NoOverscrollContainer {
                 LazyColumn(modifier = Modifier.heightIn(max = 220.dp)) {

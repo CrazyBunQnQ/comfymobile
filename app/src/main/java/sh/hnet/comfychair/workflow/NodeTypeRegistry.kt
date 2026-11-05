@@ -23,7 +23,12 @@ data class InputDefinition(
     val forceInput: Boolean = false,    // If true, must be connected (not editable)
     val tooltip: String? = null,        // Help text for the input
     val round: Number? = null,          // Rounding precision for FLOAT
-    val multiselect: Boolean = false    // For COMBO: allow multiple selections
+    val multiselect: Boolean = false,   // For COMBO: allow multiple selections
+    val autogrowNames: List<String>? = null,
+    val autogrowPrefix: String? = null,
+    val autogrowMin: Int? = null,
+    val autogrowMax: Int? = null,
+    val autogrowInputType: String? = null
 )
 
 /**
@@ -210,6 +215,34 @@ class NodeTypeRegistry {
 
             when (firstElement) {
                 is String -> {
+                    if (firstElement == "COMFY_AUTOGROW_V3" && optionsObj != null) {
+                        val template = optionsObj.optJSONObject("template")
+                        val namesJson = template?.optJSONArray("names")
+                        val names = namesJson?.let { array ->
+                            (0 until array.length()).mapNotNull { index ->
+                                array.opt(index) as? String
+                            }
+                        }
+                        val inputType = when (val input = template?.opt("input")) {
+                            is String -> input
+                            is JSONArray -> input.optString(0).takeIf { it.isNotEmpty() }
+                            is JSONObject -> input.optString("type").takeIf { it.isNotEmpty() }
+                            else -> null
+                        }
+                        result.add(
+                            InputDefinition(
+                                name = inputName,
+                                type = firstElement,
+                                isRequired = isRequired,
+                                autogrowNames = names,
+                                autogrowPrefix = template?.optString("prefix")?.takeIf { it.isNotEmpty() },
+                                autogrowMin = (template?.opt("min") as? Number)?.toInt(),
+                                autogrowMax = (template?.opt("max") as? Number)?.toInt(),
+                                autogrowInputType = inputType
+                            )
+                        )
+                        continue
+                    }
                     // Check for new COMBO format: ["COMBO", {"options": [...], "multiselect": bool}]
                     if (firstElement == "COMBO" && optionsObj != null) {
                         val optionsArray = optionsObj.optJSONArray("options")
@@ -321,7 +354,12 @@ class NodeTypeRegistry {
      */
     fun getInputType(classType: String, inputName: String): String? {
         val info = nodeTypes[classType] ?: return null
-        return info.inputTypes[inputName]
+        info.inputTypes[inputName]?.let { return it }
+        val parentName = inputName.substringBefore('.', inputName)
+        if (parentName == inputName) return null
+        return nodeDefinitions[classType]?.inputs
+            ?.firstOrNull { it.name == parentName && it.type == "COMFY_AUTOGROW_V3" }
+            ?.autogrowInputType
     }
 
     /**
@@ -342,6 +380,15 @@ class NodeTypeRegistry {
             return null
         }
         val inputDef = definition.inputs.find { it.name == inputName }
+            ?: inputName.substringBefore('.', inputName)
+                .takeIf { it != inputName }
+                ?.let { parentName ->
+                    definition.inputs.firstOrNull {
+                        it.name == parentName && it.type == "COMFY_AUTOGROW_V3"
+                    }?.let { parent ->
+                        parent.copy(name = inputName, type = parent.autogrowInputType ?: parent.type)
+                    }
+                }
         if (inputDef == null) {
             DebugLogger.d(TAG, "getInputDefinition: Input '$inputName' not found on node '$classType'")
         } else {

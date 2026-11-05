@@ -3,15 +3,18 @@ package sh.hnet.comfychair
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.ResponseBody
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.source
 import org.json.JSONObject
 import sh.hnet.comfychair.connection.ConnectionFailure
 import sh.hnet.comfychair.model.AuthCredentials
@@ -1746,18 +1749,8 @@ class ComfyUIClient(
     }
 
     /**
-     * Upload an image to the ComfyUI server input folder
-     * Used for Image-to-image to upload the source image with mask
-     *
-     * @param imageData The PNG image data as byte array
-     * @param filename The desired filename for the uploaded image
-     * @param subfolder The subfolder to upload to (default empty = root input folder)
-     * @param overwrite Whether to overwrite existing file (default true)
-     * @param callback Called with the result:
-     *                 - success: true if uploaded successfully
-     *                 - filename: The actual filename saved on the server
-     *                 - errorMessage: error message if failed
-     *                 - failureType: type of failure (NONE for success, AUTHENTICATION for 401/403, NETWORK for other errors)
+     * Upload an image to the ComfyUI server input folder.
+     * Used by Image-to-image to upload the source image with mask.
      */
     fun uploadImage(
         imageData: ByteArray,
@@ -1767,37 +1760,94 @@ class ComfyUIClient(
         callback: (success: Boolean, filename: String?, errorMessage: String?, failureType: ConnectionFailure) -> Unit
     ) {
         DebugLogger.i(TAG, "Uploading image: ${Obfuscator.filename(filename)} (${imageData.size} bytes)")
+        uploadMultipart(
+            fileBody = imageData.toRequestBody("image/png".toMediaType()),
+            filename = filename,
+            subfolder = subfolder,
+            overwrite = overwrite,
+            returnInputPath = false,
+            callback = callback
+        )
+    }
+
+    /**
+     * Stream media from the application's content resolver to ComfyUI's input folder.
+     * The returned filename is an input-relative path (subfolder/name when applicable).
+     */
+    fun uploadMedia(
+        uri: Uri,
+        filename: String,
+        mimeType: String,
+        subfolder: String = "",
+        overwrite: Boolean = false,
+        callback: (success: Boolean, filename: String?, errorMessage: String?, failureType: ConnectionFailure) -> Unit
+    ) {
+        val resolver = context?.applicationContext?.contentResolver ?: run {
+            callback(
+                false,
+                null,
+                "Unable to read media: application context is unavailable",
+                ConnectionFailure.NETWORK
+            )
+            return
+        }
+
+        val fileBody = object : RequestBody() {
+            override fun contentType() = mimeType.toMediaType()
+
+            override fun writeTo(sink: okio.BufferedSink) {
+                val input = try {
+                    resolver.openInputStream(uri)
+                } catch (e: Exception) {
+                    throw IOException("Unable to read selected media: ${e.message ?: "access denied"}", e)
+                } ?: throw IOException("Unable to read selected media: the URI could not be opened")
+
+                try {
+                    input.source().use { source -> sink.writeAll(source) }
+                } catch (e: IOException) {
+                    throw IOException("Unable to read selected media: ${e.message ?: "I/O error"}", e)
+                }
+            }
+        }
+
+        uploadMultipart(
+            fileBody = fileBody,
+            filename = filename,
+            subfolder = subfolder,
+            overwrite = overwrite,
+            returnInputPath = true,
+            callback = callback
+        )
+    }
+
+    private fun uploadMultipart(
+        fileBody: RequestBody,
+        filename: String,
+        subfolder: String,
+        overwrite: Boolean,
+        returnInputPath: Boolean,
+        callback: (success: Boolean, filename: String?, errorMessage: String?, failureType: ConnectionFailure) -> Unit
+    ) {
         val baseUrl = getBaseUrl() ?: run {
             DebugLogger.w(TAG, "Upload failed: no connection")
             callback(false, null, context?.getString(R.string.error_no_connection) ?: "No connection to server", ConnectionFailure.NETWORK)
             return
         }
 
-        val url = "$baseUrl/upload/image"
-
-        // Build multipart form data request
-        val requestBody = MultipartBody.Builder()
+        val multipartBody = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
-            .addFormDataPart(
-                "image",
-                filename,
-                imageData.toRequestBody("image/png".toMediaType())
-            )
+            .addFormDataPart("image", filename, fileBody)
             .addFormDataPart("subfolder", subfolder)
             .addFormDataPart("overwrite", overwrite.toString())
             .build()
-
-        // Wrap with progress tracking for stall detection
-        val progressBody = ProgressTrackingRequestBody(requestBody)
-
+        val progressBody = ProgressTrackingRequestBody(multipartBody)
         val request = Request.Builder()
-            .url(url)
+            .url("$baseUrl/upload/image")
             .post(progressBody)
             .build()
-
         val call = transferClient.newCall(request)
 
-        // Watchdog coroutine to detect stalls
+        // Watchdog coroutine to detect stalled uploads.
         val watchdogJob = CoroutineScope(Dispatchers.IO).launch {
             while (isActive) {
                 delay(STALL_CHECK_INTERVAL_MS)
@@ -1813,13 +1863,11 @@ class ComfyUIClient(
             override fun onFailure(call: okhttp3.Call, e: IOException) {
                 watchdogJob.cancel()
                 if (call.isCanceled()) {
-                    // Stall detected - watchdog cancelled the call
                     DebugLogger.w(TAG, "Upload stalled")
-                    callback(false, null, context?.getString(R.string.error_upload_stalled)
-                        ?: "Upload stalled", ConnectionFailure.STALLED)
+                    callback(false, null, context?.getString(R.string.error_upload_stalled) ?: "Upload stalled", ConnectionFailure.STALLED)
                 } else {
                     DebugLogger.e(TAG, "Upload failed: ${e.message}")
-                    callback(false, null, "Upload failed: ${e.message}", ConnectionFailure.NETWORK)
+                    callback(false, null, "Upload failed: ${e.message ?: "Unable to read or send media"}", ConnectionFailure.NETWORK)
                 }
             }
 
@@ -1829,23 +1877,35 @@ class ComfyUIClient(
                     if (response.isSuccessful) {
                         try {
                             val json = JSONObject(response.body?.string() ?: "{}")
-                            val savedFilename = json.optString("name", filename)
+                            val savedName = json.optString("name", filename).ifEmpty { filename }
+                            val returnedFilename = if (returnInputPath) {
+                                val savedSubfolder = json.optString("subfolder", subfolder)
+                                if (savedSubfolder.isEmpty()) savedName else "$savedSubfolder/$savedName"
+                            } else {
+                                savedName
+                            }
                             DebugLogger.i(TAG, "Upload successful")
-                            callback(true, savedFilename, null, ConnectionFailure.NONE)
+                            callback(true, returnedFilename, null, ConnectionFailure.NONE)
                         } catch (e: Exception) {
                             DebugLogger.e(TAG, "Failed to parse upload response: ${e.message}")
                             callback(false, null, "Failed to parse response: ${e.message}", ConnectionFailure.NETWORK)
                         }
+                    } else if (response.code == 401 || response.code == 403) {
+                        DebugLogger.e(TAG, "Upload auth error: ${response.code}")
+                        callback(false, null, context?.getString(R.string.error_auth_unauthorized) ?: "Authentication failed", ConnectionFailure.AUTHENTICATION)
                     } else {
-                        // Handle authentication errors with clean messages
-                        if (response.code == 401 || response.code == 403) {
-                            DebugLogger.e(TAG, "Upload auth error: ${response.code}")
-                            callback(false, null, context?.getString(R.string.error_auth_unauthorized)
-                                ?: "Authentication failed", ConnectionFailure.AUTHENTICATION)
-                        } else {
-                            DebugLogger.e(TAG, "Upload error: ${response.code}")
-                            callback(false, null, "Server error: ${response.code}", ConnectionFailure.NETWORK)
+                        val serverMessage = try {
+                            response.body?.string()?.trim()?.take(500).orEmpty()
+                        } catch (e: IOException) {
+                            "Could not read server error response: ${e.message ?: "I/O error"}"
                         }
+                        val errorMessage = if (serverMessage.isEmpty()) {
+                            "Server error: ${response.code}"
+                        } else {
+                            "Server error: ${response.code}: $serverMessage"
+                        }
+                        DebugLogger.e(TAG, "Upload error: $errorMessage")
+                        callback(false, null, errorMessage, ConnectionFailure.NETWORK)
                     }
                 }
             }

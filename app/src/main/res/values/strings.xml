@@ -397,6 +397,10 @@
     <string name="field_desc_clip4">Fourth CLIP text encoder</string>
     <string name="field_desc_width">Output image width</string>
     <string name="field_desc_height">Output image height</string>
+    <string name="field_desc_reference_slot">Reference media loader input. Reference generation uses an independent output canvas; do not map preprocessing dimensions.</string>
+    <string name="reference_canvas_mapping_guidance">For reference generation, map width and height to independent output canvas fields, not reference-image/video preprocessing sizes. Reference inputs do not determine output dimensions.</string>
+    <string name="reference_media_mapping_guidance">Map at least one reference image, or for reference-to-video, at least one image or video. Each filename can only be assigned to one numbered slot.</string>
+    <string name="reference_media_mapping_required">Select at least one reference image; reference-to-video also accepts a reference video.</string>
     <string name="field_desc_steps">Number of sampling steps</string>
     <string name="field_desc_cfg">Classifier-free guidance scale</string>
     <string name="field_desc_sampler">Sampling algorithm</string>
@@ -736,4 +740,16 @@
     <string name="album_sort_recent">Recently added</string>
     <string name="album_sort_count">Most images</string>
     <string name="msg_extension_outdated">Update the ComfyMobile extension on the PC (and restart ComfyUI) so albums can be renamed and deleted completely</string>
+    <string name="nav_reference_to_image">Reference to Image</string>
+    <string name="nav_reference_to_video">Reference to Video</string>
+    <string name="workflow_section_ref2i">Reference to Image</string>
+    <string name="workflow_section_ref2v">Reference to Video</string>
+    <string name="reference_image_slot">Reference image %1$d</string>
+    <string name="reference_video_slot">Reference video %1$d</string>
+    <string name="reference_images">Reference images</string>
+    <string name="reference_videos">Reference videos</string>
+    <string name="reference_add">Add references</string>
+    <string name="reference_reselect">Cannot read file. Select it again.</string>
+    <string name="reference_not_added">%1$d files were not added (capacity or media type).</string>
+    <string name="reference_required">Select at least one compatible reference.</string>
 </resources>

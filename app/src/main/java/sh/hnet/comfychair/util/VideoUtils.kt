@@ -38,6 +38,7 @@ object VideoUtils {
         client: ComfyUIClient,
         promptId: String,
         filePrefix: String,
+        expectedServerId: String? = ConnectionManager.currentServerId,
         onComplete: (Uri?) -> Unit
     ) {
         val mainHandler = Handler(Looper.getMainLooper())
@@ -57,62 +58,65 @@ object VideoUtils {
                 return@fetchHistory
             }
 
-            // Find video in outputs
-            // Note: ComfyUI may return videos in "videos", "gifs", or even "images" arrays
-            // We check file extension to identify video files
-            val outputKeys = outputs.keys()
-            while (outputKeys.hasNext()) {
-                val nodeId = outputKeys.next()
-                val nodeOutput = outputs.optJSONObject(nodeId)
+            // Find the produced video. ComfyUI may list it under "videos", "gifs", or
+            // "images", and it also echoes input files back, so pick the output file.
+            val selected = HistoryMediaSelector.select(outputs, preferVideo = true)
+            if (selected != null) {
+                val filename = selected.filename
+                val subfolder = selected.subfolder
+                val type = selected.type
 
-                // Check videos, gifs, and images arrays for video files
-                val videos = nodeOutput?.optJSONArray("videos")
-                    ?: nodeOutput?.optJSONArray("gifs")
-                    ?: nodeOutput?.optJSONArray("images")
-
-                if (videos != null && videos.length() > 0) {
-                    val videoInfo = videos.optJSONObject(0)
-                    val filename = videoInfo?.optString("filename") ?: continue
-                    val subfolder = videoInfo.optString("subfolder", "")
-                    val type = videoInfo.optString("type", "output")
-
-                    // Fetch video bytes
-                    client.fetchVideo(filename, subfolder, type) { videoBytes, failureType ->
-                        if (videoBytes == null) {
-                            if (failureType == ConnectionFailure.STALLED) {
-                                mainHandler.post {
-                                    ConnectionManager.showConnectionAlert(context, failureType)
-                                    onComplete(null)
-                                }
-                            } else {
-                                mainHandler.post { onComplete(null) }
+                // Fetch video bytes
+                client.fetchVideo(filename, subfolder, type) { videoBytes, failureType ->
+                    if (videoBytes == null) {
+                        if (failureType == ConnectionFailure.STALLED) {
+                            mainHandler.post {
+                                ConnectionManager.showConnectionAlert(context, failureType)
+                                onComplete(null)
                             }
-                            return@fetchVideo
-                        }
-
-                        // Store in memory/disk based on caching mode
-                        val mediaKey = when (filePrefix) {
-                            FilePrefix.TEXT_TO_VIDEO -> MediaStateHolder.MediaKey.TtvVideo(promptId)
-                            FilePrefix.IMAGE_TO_VIDEO -> MediaStateHolder.MediaKey.ItvVideo(promptId)
-                            else -> null
-                        }
-
-                        if (mediaKey == null) {
+                        } else {
                             mainHandler.post { onComplete(null) }
-                            return@fetchVideo
                         }
-
-                        // Pass context for disk-first mode support
-                        MediaStateHolder.putVideoBytes(mediaKey, videoBytes, context)
-
-                        // Get URI for playback (creates temp file in cacheDir)
-                        CoroutineScope(Dispatchers.Main).launch {
-                            val uri = MediaStateHolder.getVideoUri(context, mediaKey)
-                            onComplete(uri)
-                        }
+                        return@fetchVideo
                     }
-                    return@fetchHistory
+
+                    // Store in memory/disk based on caching mode
+                    val mediaKey = when (filePrefix) {
+                        FilePrefix.TEXT_TO_VIDEO -> MediaStateHolder.MediaKey.TtvVideo(promptId)
+                        FilePrefix.IMAGE_TO_VIDEO -> MediaStateHolder.MediaKey.ItvVideo(promptId)
+                        FilePrefix.REFERENCE_TO_VIDEO -> MediaStateHolder.MediaKey.Ref2vVideo(promptId)
+                        else -> null
+                    }
+
+                    if (mediaKey == null) {
+                        mainHandler.post { onComplete(null) }
+                        return@fetchVideo
+                    }
+
+                    // Do not let an in-flight old-server result replace the current server's cache.
+                    if (expectedServerId == null ||
+                        ConnectionManager.currentServerId != expectedServerId ||
+                        MediaStateHolder.getCurrentServerId() != expectedServerId
+                    ) {
+                        mainHandler.post { onComplete(null) }
+                        return@fetchVideo
+                    }
+                    MediaStateHolder.putVideoBytes(mediaKey, videoBytes, context)
+
+                    // Get URI for playback (creates temp file in cacheDir)
+                    CoroutineScope(Dispatchers.Main).launch {
+                        if (ConnectionManager.currentServerId != expectedServerId ||
+                            MediaStateHolder.getCurrentServerId() != expectedServerId
+                        ) {
+                            onComplete(null)
+                            return@launch
+                        }
+                        val uri = MediaStateHolder.getVideoUri(context, mediaKey)
+                        onComplete(if (ConnectionManager.currentServerId == expectedServerId &&
+                            MediaStateHolder.getCurrentServerId() == expectedServerId) uri else null)
+                    }
                 }
+                return@fetchHistory
             }
 
             mainHandler.post { onComplete(null) }
@@ -208,6 +212,7 @@ object VideoUtils {
      */
     object FilePrefix {
         const val TEXT_TO_VIDEO = "last_generated_video_"
+        const val REFERENCE_TO_VIDEO = "ref2v_last_generated_"
         const val IMAGE_TO_VIDEO = "image_to_video_last_generated_"
     }
 
@@ -217,5 +222,6 @@ object VideoUtils {
     object GalleryPrefix {
         const val TEXT_TO_VIDEO = "ComfyMobile"
         const val IMAGE_TO_VIDEO = "ComfyMobile_ITV"
+        const val REFERENCE_TO_VIDEO = "ComfyMobile_REF2V"
     }
 }

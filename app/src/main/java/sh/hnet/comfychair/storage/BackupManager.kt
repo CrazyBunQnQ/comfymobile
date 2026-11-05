@@ -226,9 +226,19 @@ class BackupManager(private val context: Context) {
                 put("imageToImage", readImageToImagePrefs(server.id))
                 put("textToVideo", readTextToVideoPrefs(server.id))
                 put("imageToVideo", readImageToVideoPrefs(server.id))
+                put("referenceToImage", readReferencePrefs(server.id, "ReferenceToImagePrefs"))
+                put("referenceToVideo", readReferencePrefs(server.id, "ReferenceToVideoPrefs"))
             })
         }
         return result
+    }
+
+    private fun readReferencePrefs(serverId: String, name: String): JSONObject {
+        val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
+        return JSONObject().apply {
+            put("selectedWorkflowId", prefs.getString("${serverId}_selectedWorkflowId", ""))
+            put("positivePrompt", prefs.getString("${serverId}_positivePrompt", ""))
+        }
     }
 
     private fun readTextToImagePrefs(serverId: String): JSONObject {
@@ -389,6 +399,15 @@ class BackupManager(private val context: Context) {
             }
             serverPrefs.optJSONObject("imageToVideo")?.let {
                 restoreImageToVideoPrefs(it, actualServerId)
+            }
+            for ((key, prefs) in listOf("referenceToImage" to "ReferenceToImagePrefs", "referenceToVideo" to "ReferenceToVideoPrefs")) {
+                serverPrefs.optJSONObject(key)?.let { value ->
+                    context.getSharedPreferences(prefs, Context.MODE_PRIVATE).edit().apply {
+                        putString("${actualServerId}_selectedWorkflowId", value.optString("selectedWorkflowId"))
+                        validator.validateAndSanitizePrompt(value.optString("positivePrompt"))?.let { putString("${actualServerId}_positivePrompt", it) }
+                        apply()
+                    }
+                }
             }
         }
     }
@@ -569,6 +588,13 @@ class BackupManager(private val context: Context) {
                 // Node attribute edits
                 if (json.has("nodeAttributeEdits")) {
                     put("nodeAttributeEdits", json.optString("nodeAttributeEdits"))
+                }
+                for (key in listOf("reference_image_uris", "reference_video_uris")) {
+                    json.optJSONArray(key)?.let { array ->
+                        put(key, JSONArray().apply {
+                            for (index in 0 until array.length()) (array.opt(index) as? String)?.let { put(it) }
+                        })
+                    }
                 }
             }
         } catch (e: Exception) {

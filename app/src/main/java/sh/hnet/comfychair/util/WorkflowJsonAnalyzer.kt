@@ -5,6 +5,7 @@ import sh.hnet.comfychair.WorkflowType
 import sh.hnet.comfychair.WorkflowValidationResult
 import sh.hnet.comfychair.workflow.TemplateKeyRegistry
 import sh.hnet.comfychair.workflow.WorkflowGraph
+import sh.hnet.comfychair.workflow.ReferenceWorkflowSupport
 
 /**
  * Utilities for analyzing workflow JSON content.
@@ -22,7 +23,9 @@ internal object WorkflowJsonAnalyzer {
         WorkflowType.ITI_INPAINTING to listOf("{{positive_prompt}}"),
         WorkflowType.ITI_EDITING to listOf("{{positive_prompt}}"),
         WorkflowType.TTV to listOf("{{positive_prompt}}"),
-        WorkflowType.ITV to listOf("{{positive_prompt}}")
+        WorkflowType.ITV to listOf("{{positive_prompt}}"),
+        WorkflowType.REF2I to listOf("{{positive_prompt}}", "{{width}}", "{{height}}"),
+        WorkflowType.REF2V to listOf("{{positive_prompt}}", "{{width}}", "{{height}}")
     )
 
     // Required patterns (not placeholders but literal strings that must exist)
@@ -37,7 +40,9 @@ internal object WorkflowJsonAnalyzer {
         "iti_inpainting_" to WorkflowType.ITI_INPAINTING,
         "iti_editing_" to WorkflowType.ITI_EDITING,
         "ttv_" to WorkflowType.TTV,
-        "itv_" to WorkflowType.ITV
+        "itv_" to WorkflowType.ITV,
+        "ref2i_" to WorkflowType.REF2I,
+        "ref2v_" to WorkflowType.REF2V
     )
 
     /**
@@ -113,6 +118,10 @@ internal object WorkflowJsonAnalyzer {
             classType.contains("VHS_VideoCombine", ignoreCase = true) ||
             classType.contains("VideoLinearCFGGuidance", ignoreCase = true)
         }
+        val hasReferences = Regex("\\{\\{reference_(?:image|video)_[1-9][0-9]*\\}\\}").containsMatchIn(nodesJson.toString())
+        if (hasReferences) return if (hasVideoNodes || classTypes.any { it.contains("SaveVideo", true) }) WorkflowType.REF2V else WorkflowType.REF2I
+        if ("MiniMaxH3ReferenceToVideo" in classTypes) return WorkflowType.REF2V
+        if ("TextEncodeQwenImage21" in classTypes) return WorkflowType.REF2I
 
         // Check for LoadImage node
         val hasLoadImage = classTypes.any { classType ->
@@ -180,6 +189,10 @@ internal object WorkflowJsonAnalyzer {
             classType.contains("VHS_VideoCombine", ignoreCase = true) ||
             classType.contains("VideoLinearCFGGuidance", ignoreCase = true)
         }
+        val hasReferences = graph.templateVariables.any { ReferenceWorkflowSupport.parseKey(it) != null }
+        if (hasReferences) return if (hasVideoNodes || classTypes.any { it.contains("SaveVideo", true) }) WorkflowType.REF2V else WorkflowType.REF2I
+        if ("MiniMaxH3ReferenceToVideo" in classTypes) return WorkflowType.REF2V
+        if ("TextEncodeQwenImage21" in classTypes) return WorkflowType.REF2I
 
         val hasLoadImage = classTypes.any { it.equals("LoadImage", ignoreCase = true) }
         val hasInpaintingNodes = classTypes.any {
@@ -223,6 +236,10 @@ internal object WorkflowJsonAnalyzer {
             JSONObject(jsonContent)
         } catch (e: Exception) {
             return WorkflowValidationResult.InvalidJson(e.message ?: "Invalid JSON")
+        }
+        if (ReferenceWorkflowSupport.isReferenceType(type)) {
+            val slots = ReferenceWorkflowSupport.findSlots(JSONObject(jsonContent), type)
+            if (slots.isFailure) return WorkflowValidationResult.InvalidJson(slots.exceptionOrNull()?.message ?: "Invalid reference slots")
         }
 
         // Check for required placeholders

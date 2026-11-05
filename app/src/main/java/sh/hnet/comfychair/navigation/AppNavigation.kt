@@ -9,6 +9,8 @@ sealed class MainRoute(val route: String) {
     data object ImageToImage : MainRoute("image_to_image")
     data object TextToVideo : MainRoute("text_to_video")
     data object ImageToVideo : MainRoute("image_to_video")
+    data object ReferenceToImage : MainRoute("reference_to_image")
+    data object ReferenceToVideo : MainRoute("reference_to_video")
     data object Gallery : MainRoute("gallery")
 }
 

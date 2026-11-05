@@ -1,6 +1,7 @@
 package sh.hnet.comfychair.model
 
 import org.json.JSONObject
+import org.json.JSONArray
 
 /**
  * Represents user-saved values for a specific workflow.
@@ -58,7 +59,9 @@ data class WorkflowValues(
     val batchSize: Int? = null,
     val upscaleMethod: String? = null,
     val scaleBy: Float? = null,
-    val stopAtClipLayer: Int? = null
+    val stopAtClipLayer: Int? = null,
+    val referenceImageUris: List<String> = emptyList(),
+    val referenceVideoUris: List<String> = emptyList()
 ) {
     companion object {
         fun fromJson(jsonString: String): WorkflowValues {
@@ -99,7 +102,13 @@ data class WorkflowValues(
                 batchSize = json.optInt("batchSize").takeIf { it > 0 },
                 upscaleMethod = json.optString("upscaleMethod").takeIf { it.isNotEmpty() },
                 scaleBy = json.optDouble("scaleBy").takeIf { !it.isNaN() }?.toFloat(),
-                stopAtClipLayer = json.optInt("stopAtClipLayer", 0).takeIf { it != 0 }
+                stopAtClipLayer = json.optInt("stopAtClipLayer", 0).takeIf { it != 0 },
+                referenceImageUris = json.optJSONArray("reference_image_uris")?.let { array ->
+                    (0 until array.length()).mapNotNull { array.opt(it) as? String }
+                }.orEmpty(),
+                referenceVideoUris = json.optJSONArray("reference_video_uris")?.let { array ->
+                    (0 until array.length()).mapNotNull { array.opt(it) as? String }
+                }.orEmpty()
             )
         }
 
@@ -141,6 +150,8 @@ data class WorkflowValues(
                 values.upscaleMethod?.let { put("upscaleMethod", it) }
                 values.scaleBy?.let { put("scaleBy", it.toDouble()) }
                 values.stopAtClipLayer?.let { put("stopAtClipLayer", it) }
+                put("reference_image_uris", JSONArray(values.referenceImageUris))
+                put("reference_video_uris", JSONArray(values.referenceVideoUris))
             }.toString()
         }
     }

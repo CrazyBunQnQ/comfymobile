@@ -18,6 +18,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import kotlinx.coroutines.runBlocking
 import sh.hnet.comfychair.cache.MediaCache
 import sh.hnet.comfychair.cache.MediaStateHolder
@@ -37,6 +39,7 @@ import sh.hnet.comfychair.viewmodel.ImageToImageViewModel
 import sh.hnet.comfychair.viewmodel.ImageToVideoViewModel
 import sh.hnet.comfychair.viewmodel.TextToImageViewModel
 import sh.hnet.comfychair.viewmodel.TextToVideoViewModel
+import sh.hnet.comfychair.viewmodel.ReferenceGenerationViewModel
 
 /**
  * Container activity that hosts the main navigation graph.
@@ -53,6 +56,19 @@ class MainContainerActivity : ComponentActivity() {
     private val generationViewModel: GenerationViewModel by viewModels()
     private val imageToImageViewModel: ImageToImageViewModel by viewModels()
     private val imageToVideoViewModel: ImageToVideoViewModel by viewModels()
+    private fun referenceFactory(type: WorkflowType) = object : ViewModelProvider.Factory {
+        override fun <T : ViewModel> create(modelClass: Class<T>): T {
+            require(modelClass.isAssignableFrom(ReferenceGenerationViewModel::class.java))
+            @Suppress("UNCHECKED_CAST")
+            return ReferenceGenerationViewModel(type) as T
+        }
+    }
+    private val referenceToImageViewModel by lazy {
+        ViewModelProvider(this, referenceFactory(WorkflowType.REF2I))["ref2i", ReferenceGenerationViewModel::class.java]
+    }
+    private val referenceToVideoViewModel by lazy {
+        ViewModelProvider(this, referenceFactory(WorkflowType.REF2V))["ref2v", ReferenceGenerationViewModel::class.java]
+    }
 
     // Credential storage — used to persist refreshed browser-session cookies
     private val credentialStorage by lazy { CredentialStorage(applicationContext) }
@@ -157,6 +173,8 @@ class MainContainerActivity : ComponentActivity() {
             ImageToImageViewModel.OWNER_ID -> MainRoute.ImageToImage.route
             TextToVideoViewModel.OWNER_ID -> MainRoute.TextToVideo.route
             ImageToVideoViewModel.OWNER_ID -> MainRoute.ImageToVideo.route
+            "ref2i" -> MainRoute.ReferenceToImage.route
+            "ref2v" -> MainRoute.ReferenceToVideo.route
             else -> MainRoute.TextToImage.route
         }
 
@@ -173,6 +191,8 @@ class MainContainerActivity : ComponentActivity() {
                         generationViewModel = generationViewModel,
                         imageToImageViewModel = imageToImageViewModel,
                         imageToVideoViewModel = imageToVideoViewModel,
+                        referenceToImageViewModel = referenceToImageViewModel,
+                        referenceToVideoViewModel = referenceToVideoViewModel,
                         onNavigateToSettings = { openSettings() },
                         onNavigateToGallery = { openGallery() },
                         onLogout = { logout() },

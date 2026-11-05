@@ -15,6 +15,7 @@ import sh.hnet.comfychair.util.Obfuscator
 import sh.hnet.comfychair.util.UuidUtils
 import sh.hnet.comfychair.util.ValidationUtils
 import sh.hnet.comfychair.workflow.TemplateKeyRegistry
+import sh.hnet.comfychair.workflow.ReferenceWorkflowSupport
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,7 +30,9 @@ enum class WorkflowType {
     ITI_INPAINTING,   // Image-to-Image Inpainting
     ITI_EDITING,      // Image-to-Image Editing
     TTV,              // Text-to-Video
-    ITV               // Image-to-Video
+    ITV,              // Image-to-Video
+    REF2I,            // Reference-to-Image
+    REF2V             // Reference-to-Video
 }
 
 /**
@@ -46,7 +49,9 @@ object WorkflowTypeDisplay {
         WorkflowType.ITI_INPAINTING to R.string.workflow_section_iti_inpainting,
         WorkflowType.ITI_EDITING to R.string.workflow_section_iti_editing,
         WorkflowType.TTV to R.string.workflow_section_ttv,
-        WorkflowType.ITV to R.string.workflow_section_itv
+        WorkflowType.ITV to R.string.workflow_section_itv,
+        WorkflowType.REF2I to R.string.workflow_section_ref2i,
+        WorkflowType.REF2V to R.string.workflow_section_ref2v
     )
 
     /**
@@ -635,10 +640,15 @@ object WorkflowManager {
         val isWrapped = json.has("nodes") && json.optJSONObject("nodes") != null
 
         val nodesJson = if (isWrapped) json.getJSONObject("nodes") else json
+        val mappings = if (ReferenceWorkflowSupport.isReferenceType(type)) {
+            runCatching {
+                ReferenceWorkflowSupport.applyMappings(json, type, fieldMappings, ConnectionManager.nodeTypeRegistry)
+            }.getOrElse { return Result.failure(it) }
+        } else fieldMappings
 
         // Extract original values before replacing with placeholders to create defaults
         val extractedDefaults = mutableMapOf<String, Any>()
-        fieldMappings.forEach { (fieldKey, mapping) ->
+        mappings.forEach { (fieldKey, mapping) ->
             val (nodeId, inputKey) = mapping
             val nodeJson = nodesJson.optJSONObject(nodeId)
             if (nodeJson != null) {
@@ -660,7 +670,7 @@ object WorkflowManager {
         }
 
         // Apply field mappings - replace values with placeholders
-        fieldMappings.forEach { (fieldKey, mapping) ->
+        mappings.forEach { (fieldKey, mapping) ->
             val (nodeId, inputKey) = mapping
             val nodeJson = nodesJson.optJSONObject(nodeId)
             if (nodeJson != null) {
@@ -675,7 +685,7 @@ object WorkflowManager {
         }
 
         // Build reverse map: placeholder name -> target node ID for all mapped fields
-        val placeholderToTargetNodeId = fieldMappings.entries.associate { (fieldKey, mapping) ->
+        val placeholderToTargetNodeId = mappings.entries.associate { (fieldKey, mapping) ->
             TemplateKeyRegistry.getPlaceholderForKey(fieldKey) to mapping.first
         }
 
@@ -686,7 +696,7 @@ object WorkflowManager {
         //   in an unrelated node (e.g. {{latent_upscale_model}} in UltralyticsDetectorProvider)
         //   would receive the wrong value and cause a server 400 error.
         // - Unmapped: node holds {{placeholder}} for an optional field that has no mapping at all.
-        val mappedFieldKeys = fieldMappings.keys
+        val mappedFieldKeys = mappings.keys
         val allOptionalKeys = TemplateKeyRegistry.getOptionalKeysForType(type)
         val unmappedOptionalKeys = allOptionalKeys - mappedFieldKeys
         val placeholderRegex = Regex("\\{\\{(\\w+)\\}\\}")
@@ -753,9 +763,9 @@ object WorkflowManager {
                 put("manual_placement", json.getBoolean("manual_placement"))
             }
             // Store field mappings for reference
-            if (fieldMappings.isNotEmpty()) {
+            if (mappings.isNotEmpty()) {
                 put("fieldMappings", JSONObject().apply {
-                    fieldMappings.forEach { (fieldKey, mapping) ->
+                    mappings.forEach { (fieldKey, mapping) ->
                         put(fieldKey, JSONObject().apply {
                             put("nodeId", mapping.first)
                             put("inputKey", mapping.second)
@@ -763,6 +773,12 @@ object WorkflowManager {
                     }
                 })
             }
+        }
+        if (ReferenceWorkflowSupport.isReferenceType(type)) {
+            runCatching {
+                ReferenceWorkflowSupport.findSlots(finalJson, type).getOrThrow()
+                ReferenceWorkflowSupport.validateIndependentCanvas(finalJson, type, ConnectionManager.nodeTypeRegistry)
+            }.getOrElse { return Result.failure(it) }
         }
 
         // Generate filename
@@ -836,10 +852,15 @@ object WorkflowManager {
         // Check if already wrapped
         val isWrapped = json.has("nodes") && json.optJSONObject("nodes") != null
         val nodesJson = if (isWrapped) json.getJSONObject("nodes") else json
+        val mappings = if (ReferenceWorkflowSupport.isReferenceType(existingWorkflow.type)) {
+            runCatching {
+                ReferenceWorkflowSupport.applyMappings(json, existingWorkflow.type, fieldMappings, ConnectionManager.nodeTypeRegistry)
+            }.getOrElse { return Result.failure(it) }
+        } else fieldMappings
 
         // Extract original values before replacing with placeholders to create defaults
         val extractedDefaults = mutableMapOf<String, Any>()
-        fieldMappings.forEach { (fieldKey, mapping) ->
+        mappings.forEach { (fieldKey, mapping) ->
             val (nodeId, inputKey) = mapping
             val nodeJson = nodesJson.optJSONObject(nodeId)
             if (nodeJson != null) {
@@ -860,7 +881,7 @@ object WorkflowManager {
         }
 
         // Apply field mappings - replace values with placeholders
-        fieldMappings.forEach { (fieldKey, mapping) ->
+        mappings.forEach { (fieldKey, mapping) ->
             val (nodeId, inputKey) = mapping
             val nodeJson = nodesJson.optJSONObject(nodeId)
             if (nodeJson != null) {
@@ -873,7 +894,7 @@ object WorkflowManager {
         }
 
         // Build reverse map: placeholder name -> target node ID for all mapped fields
-        val placeholderToTargetNodeId = fieldMappings.entries.associate { (fieldKey, mapping) ->
+        val placeholderToTargetNodeId = mappings.entries.associate { (fieldKey, mapping) ->
             TemplateKeyRegistry.getPlaceholderForKey(fieldKey) to mapping.first
         }
 
@@ -884,7 +905,7 @@ object WorkflowManager {
         //   in an unrelated node (e.g. {{latent_upscale_model}} in UltralyticsDetectorProvider)
         //   would receive the wrong value and cause a server 400 error.
         // - Unmapped: node holds {{placeholder}} for an optional field that has no mapping at all.
-        val mappedFieldKeys = fieldMappings.keys
+        val mappedFieldKeys = mappings.keys
         val allOptionalKeys = TemplateKeyRegistry.getOptionalKeysForType(existingWorkflow.type)
         val unmappedOptionalKeys = allOptionalKeys - mappedFieldKeys
         val placeholderRegex = Regex("\\{\\{(\\w+)\\}\\}")
@@ -949,9 +970,9 @@ object WorkflowManager {
             if (isWrapped && json.has("manual_placement")) {
                 put("manual_placement", json.getBoolean("manual_placement"))
             }
-            if (fieldMappings.isNotEmpty()) {
+            if (mappings.isNotEmpty()) {
                 put("fieldMappings", JSONObject().apply {
-                    fieldMappings.forEach { (fieldKey, mapping) ->
+                    mappings.forEach { (fieldKey, mapping) ->
                         put(fieldKey, JSONObject().apply {
                             put("nodeId", mapping.first)
                             put("inputKey", mapping.second)
@@ -959,6 +980,12 @@ object WorkflowManager {
                     }
                 })
             }
+        }
+        if (ReferenceWorkflowSupport.isReferenceType(existingWorkflow.type)) {
+            runCatching {
+                ReferenceWorkflowSupport.findSlots(finalJson, existingWorkflow.type).getOrThrow()
+                ReferenceWorkflowSupport.validateIndependentCanvas(finalJson, existingWorkflow.type, ConnectionManager.nodeTypeRegistry)
+            }.getOrElse { return Result.failure(it) }
         }
 
         // Get filename from preferences
@@ -1572,6 +1599,39 @@ object WorkflowManager {
         }
 
         return if (modified) json.toString() else processedJson
+    }
+
+    fun prepareReferenceWorkflowById(
+        workflowId: String,
+        values: Map<String, Any>,
+        uploadedReferences: Map<String, String>
+    ): Result<String> = runCatching {
+        val workflow = getWorkflowById(workflowId) ?: error("Workflow not found: $workflowId")
+        require(ReferenceWorkflowSupport.isReferenceType(workflow.type)) { "Not a reference workflow" }
+        val saved = ConnectionManager.currentServerId?.let { workflowValuesStorage.loadValues(it, workflowId) }
+        val defaults = workflow.defaults
+        val video = workflow.type == WorkflowType.REF2V
+        val resolved = mutableMapOf<String, Any>(
+            "width" to (saved?.width ?: defaults.width ?: if (video) 832 else 1024),
+            "height" to (saved?.height ?: defaults.height ?: if (video) 480 else 1024),
+            "length" to (saved?.length ?: defaults.length ?: 33),
+            "frame_rate" to (saved?.frameRate ?: defaults.frameRate ?: 16),
+            "steps" to (saved?.steps ?: defaults.steps ?: 20),
+            "cfg" to (saved?.cfg ?: defaults.cfg ?: 7.0f),
+            "sampler_name" to (saved?.samplerName ?: defaults.samplerName ?: "euler"),
+            "scheduler" to (saved?.scheduler ?: defaults.scheduler ?: "normal"),
+            "negative_prompt" to (saved?.negativePrompt ?: defaults.negativePrompt ?: ""),
+            "seed" to (values["seed"] ?: if (saved?.randomSeed != false) (0L..999999999999L).random() else (saved.seed ?: 0L))
+        )
+        resolved.putAll(values)
+        val edited = applyNodeAttributeEdits(workflow.jsonContent, workflowId)
+        val prepared = ReferenceWorkflowSupport.prepare(
+            JSONObject(edited), workflow.type, resolved, uploadedReferences, ConnectionManager.nodeTypeRegistry
+        ).getOrThrow()
+        val loras = saved?.loraChain?.let { sh.hnet.comfychair.model.LoraSelection.fromJsonString(it) }.orEmpty()
+        val result = applyBypassedNodes(injectLoraChain(prepared.toString(), loras, workflow.type))
+        ReferenceWorkflowSupport.validatePrepared(JSONObject(result).getJSONObject("nodes"))
+        result
     }
 
     /**

@@ -196,7 +196,9 @@ fun WorkflowsSettingsScreen(
             stringResource(R.string.workflow_section_iti_inpainting) to uiState.itiInpaintingWorkflows,
             stringResource(R.string.workflow_section_iti_editing) to uiState.itiEditingWorkflows,
             stringResource(R.string.workflow_section_ttv) to uiState.ttvWorkflows,
-            stringResource(R.string.workflow_section_itv) to uiState.itvWorkflows
+            stringResource(R.string.workflow_section_itv) to uiState.itvWorkflows,
+            stringResource(R.string.workflow_section_ref2i) to uiState.ref2iWorkflows,
+            stringResource(R.string.workflow_section_ref2v) to uiState.ref2vWorkflows
         )
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             SettingsSectionHeader(stringResource(R.string.title_workflows_settings))
@@ -227,7 +229,7 @@ fun WorkflowsSettingsScreen(
                 )
             } else {
                 // One list; the type is shown as a badge on each row
-                val badges = listOf("T2I", "INP", "EDIT", "T2V", "I2V")
+                val badges = listOf("T2I", "INP", "EDIT", "T2V", "I2V", "REF2I", "REF2V")
                 val rows = sections.flatMapIndexed { i, (_, list) -> list.map { badges[i] to it } }
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column {
@@ -363,6 +365,30 @@ fun WorkflowsSettingsScreen(
                     WorkflowSection(
                         title = stringResource(R.string.workflow_section_itv),
                         workflows = uiState.itvWorkflows,
+                        onWorkflowClick = { context.startActivity(WorkflowEditorActivity.createIntent(context, it.id)) },
+                        onEditStructure = { editExistingLauncher.launch(WorkflowEditorActivity.createIntentForEditingExisting(context, it.id)) },
+                        onRename = { viewModel.onEditWorkflow(it) },
+                        onDuplicate = { viewModel.onDuplicateWorkflow(it) },
+                        onExport = { workflow, format -> viewModel.onExportWorkflow(workflow, format) },
+                        onDelete = { viewModel.onDeleteWorkflow(it) }
+                    )
+                }
+                item {
+                    WorkflowSection(
+                        title = stringResource(R.string.workflow_section_ref2i),
+                        workflows = uiState.ref2iWorkflows,
+                        onWorkflowClick = { context.startActivity(WorkflowEditorActivity.createIntent(context, it.id)) },
+                        onEditStructure = { editExistingLauncher.launch(WorkflowEditorActivity.createIntentForEditingExisting(context, it.id)) },
+                        onRename = { viewModel.onEditWorkflow(it) },
+                        onDuplicate = { viewModel.onDuplicateWorkflow(it) },
+                        onExport = { workflow, format -> viewModel.onExportWorkflow(workflow, format) },
+                        onDelete = { viewModel.onDeleteWorkflow(it) }
+                    )
+                }
+                item {
+                    WorkflowSection(
+                        title = stringResource(R.string.workflow_section_ref2v),
+                        workflows = uiState.ref2vWorkflows,
                         onWorkflowClick = { context.startActivity(WorkflowEditorActivity.createIntent(context, it.id)) },
                         onEditStructure = { editExistingLauncher.launch(WorkflowEditorActivity.createIntentForEditingExisting(context, it.id)) },
                         onRename = { viewModel.onEditWorkflow(it) },

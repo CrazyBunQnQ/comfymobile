@@ -11,6 +11,7 @@ import sh.hnet.comfychair.workflow.TemplateKeyRegistry
 import sh.hnet.comfychair.workflow.WorkflowGraph
 import sh.hnet.comfychair.workflow.WorkflowMappingState
 import sh.hnet.comfychair.workflow.WorkflowNode
+import sh.hnet.comfychair.workflow.ReferenceWorkflowSupport
 
 /**
  * Analyzes workflow graphs to detect field mapping candidates.
@@ -46,9 +47,13 @@ object FieldMappingAnalyzer {
 
         val fieldMappings = mutableListOf<FieldMappingState>()
 
-        // Process strictly required keys (isRequired = true)
+        // Process required keys. Reference media are a collective requirement and are
+        // appended from the actual reachable loaders below, not a fixed slot list.
         for (fieldKey in strictlyRequiredKeys) {
-            val candidates = findCandidatesForField(fieldKey, graph, promptMappings, nodeTypeRegistry)
+            var candidates = findCandidatesForField(fieldKey, graph, promptMappings, nodeTypeRegistry)
+            if (ReferenceWorkflowSupport.isReferenceType(type) && fieldKey in setOf("width", "height")) {
+                candidates = prioritizeIndependentCanvasCandidates(candidates)
+            }
             val requiredField = FieldDisplayRegistry.createRequiredField(context, fieldKey, isRequired = true)
 
             fieldMappings.add(
@@ -60,7 +65,7 @@ object FieldMappingAnalyzer {
             )
         }
 
-        // Process optional keys (isRequired = false)
+        // Process optional keys, adjusted for workflow structure.
         for (fieldKey in optionalKeys) {
             val candidates = findCandidatesForField(fieldKey, graph, promptMappings, nodeTypeRegistry)
             val requiredField = FieldDisplayRegistry.createRequiredField(context, fieldKey, isRequired = false)
@@ -74,11 +79,40 @@ object FieldMappingAnalyzer {
             )
         }
 
+        if (ReferenceWorkflowSupport.isReferenceType(type)) {
+            fieldMappings += ReferenceWorkflowSupport.findCandidates(graph, type, nodeTypeRegistry).map { mapping ->
+                mapping.copy(
+                    field = FieldDisplayRegistry.createRequiredField(
+                        context,
+                        mapping.field.fieldKey,
+                        isRequired = false
+                    )
+                )
+            }
+        }
+
         return WorkflowMappingState(
             workflowType = type,
             fieldMappings = fieldMappings
         )
     }
+
+    private fun prioritizeIndependentCanvasCandidates(candidates: List<FieldCandidate>): List<FieldCandidate> {
+        return candidates.asSequence()
+            .filterNot { it.classType in setOf("LoadImage", "VHS_LoadVideo", "LoadVideo") }
+            .sortedBy { candidate ->
+                when {
+                    candidate.classType.contains("Latent", ignoreCase = true) -> 0
+                    candidate.classType.contains("TextEncodeQwenImage21", ignoreCase = true) -> 1
+                    candidate.classType.contains("MiniMaxH3ReferenceToVideo", ignoreCase = true) -> 1
+                    candidate.classType.contains("Reference", ignoreCase = true) -> 1
+                    else -> 2
+                }
+            }
+            .toList()
+    }
+
+
 
     /**
      * Get optional keys for a workflow type, adjusted for graph structure.
@@ -121,6 +155,7 @@ object FieldMappingAnalyzer {
         promptMappings: Map<String, List<FieldCandidate>>,
         nodeTypeRegistry: NodeTypeRegistry
     ): List<FieldCandidate> {
+        if (ReferenceWorkflowSupport.parseKey(fieldKey) != null) return emptyList()
         // Handle positive_text and negative_text with graph tracing
         if (fieldKey == "positive_text" || fieldKey == "negative_text") {
             return promptMappings[fieldKey] ?: emptyList()
@@ -201,7 +236,7 @@ object FieldMappingAnalyzer {
         val negativeTextCandidates = mutableListOf<FieldCandidate>()
 
         // Text input keys to look for (common English names)
-        val textInputKeys = listOf("text", "prompt")
+        val textInputKeys = listOf("text", "prompt", "positive_prompt", "negative_prompt")
 
         // Strategy 1: Find nodes with known text/prompt input keys
         data class TextEncoderNode(val node: WorkflowNode, val inputKey: String)
@@ -248,7 +283,11 @@ object FieldMappingAnalyzer {
             )
 
             // Determine if this node connects to positive or negative input
-            val connectionType = traceConditioningConnection(graph, node.id)
+            val connectionType = when (inputKey) {
+                "positive_prompt" -> "positive"
+                "negative_prompt" -> "negative"
+                else -> traceConditioningConnection(graph, node.id)
+            }
 
             when (connectionType) {
                 "positive" -> positiveTextCandidates.add(0, candidate) // Add traced match first

@@ -121,6 +121,7 @@ dependencies {
     implementation(libs.androidx.security.crypto)
 
     testImplementation(libs.junit)
+    testImplementation("org.json:json:20240303")
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 }

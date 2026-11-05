@@ -32,6 +32,8 @@ import sh.hnet.comfychair.viewmodel.TextToImageViewModel
 import sh.hnet.comfychair.viewmodel.ImageToImageViewModel
 import sh.hnet.comfychair.viewmodel.TextToVideoViewModel
 import sh.hnet.comfychair.viewmodel.ImageToVideoViewModel
+import sh.hnet.comfychair.ui.screens.ReferenceGenerationScreen
+import sh.hnet.comfychair.viewmodel.ReferenceGenerationViewModel
 
 /**
  * Main navigation host that contains all the generation screens.
@@ -42,6 +44,8 @@ fun MainNavHost(
     generationViewModel: GenerationViewModel,
     imageToImageViewModel: ImageToImageViewModel,
     imageToVideoViewModel: ImageToVideoViewModel,
+    referenceToImageViewModel: ReferenceGenerationViewModel,
+    referenceToVideoViewModel: ReferenceGenerationViewModel,
     onNavigateToSettings: () -> Unit,
     onNavigateToGallery: () -> Unit,
     onLogout: () -> Unit,
@@ -121,6 +125,22 @@ fun MainNavHost(
                 ImageToVideoScreen(
                     generationViewModel = generationViewModel,
                     imageToVideoViewModel = imageToVideoViewModel,
+                    onNavigateToSettings = onNavigateToSettings,
+                    onLogout = onLogout
+                )
+            }
+            composable(MainRoute.ReferenceToImage.route) {
+                ReferenceGenerationScreen(
+                    generationViewModel = generationViewModel,
+                    referenceViewModel = referenceToImageViewModel,
+                    onNavigateToSettings = onNavigateToSettings,
+                    onLogout = onLogout
+                )
+            }
+            composable(MainRoute.ReferenceToVideo.route) {
+                ReferenceGenerationScreen(
+                    generationViewModel = generationViewModel,
+                    referenceViewModel = referenceToVideoViewModel,
                     onNavigateToSettings = onNavigateToSettings,
                     onLogout = onLogout
                 )

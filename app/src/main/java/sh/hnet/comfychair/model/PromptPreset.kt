@@ -16,7 +16,9 @@ enum class ScreenType {
     TEXT_TO_IMAGE,
     IMAGE_TO_IMAGE,  // Shared for both Inpainting and Editing modes
     TEXT_TO_VIDEO,
-    IMAGE_TO_VIDEO
+    IMAGE_TO_VIDEO,
+    REFERENCE_TO_IMAGE,
+    REFERENCE_TO_VIDEO
 }
 
 /**
@@ -28,6 +30,8 @@ fun ScreenType.displayName(): String = when (this) {
     ScreenType.IMAGE_TO_IMAGE -> stringResource(R.string.screen_type_image_to_image)
     ScreenType.TEXT_TO_VIDEO -> stringResource(R.string.screen_type_text_to_video)
     ScreenType.IMAGE_TO_VIDEO -> stringResource(R.string.screen_type_image_to_video)
+    ScreenType.REFERENCE_TO_IMAGE -> stringResource(R.string.nav_reference_to_image)
+    ScreenType.REFERENCE_TO_VIDEO -> stringResource(R.string.nav_reference_to_video)
 }
 
 /**

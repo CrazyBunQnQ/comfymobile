@@ -896,70 +896,31 @@ class GalleryRepository private constructor() {
             val outputs = promptHistory.optJSONObject("outputs") ?: continue
             val timestamp = historyTimestamp(promptHistory)
 
-            val nodeIds = outputs.keys()
-            while (nodeIds.hasNext()) {
-                val nodeId = nodeIds.next()
+            // ComfyUI echoes input files back into the outputs object, so only the
+            // produced files (type "output") belong in the gallery.
+            for (nodeId in outputs.keys()) {
                 val nodeOutput = outputs.optJSONObject(nodeId) ?: continue
 
-                // Check for videos first
-                val videos = nodeOutput.optJSONArray("videos")
-                    ?: nodeOutput.optJSONArray("gifs")
-
-                if (videos != null && videos.length() > 0) {
-                    for (i in 0 until videos.length()) {
-                        val videoInfo = videos.optJSONObject(i) ?: continue
-                        val filename = videoInfo.optString("filename", "")
+                for (arrayName in listOf("videos", "gifs", "images")) {
+                    val media = nodeOutput.optJSONArray(arrayName) ?: continue
+                    for (i in 0 until media.length()) {
+                        val mediaInfo = media.optJSONObject(i) ?: continue
+                        val filename = mediaInfo.optString("filename", "")
                         if (filename.isEmpty()) continue
 
-                        val subfolder = videoInfo.optString("subfolder", "")
-                        val type = videoInfo.optString("type", "output")
+                        val type = mediaInfo.optString("type", "output")
+                        if (type.equals("input", ignoreCase = true)) continue
+
+                        val subfolder = mediaInfo.optString("subfolder", "")
+                        val isVideo = arrayName != "images" ||
+                            VIDEO_EXTENSIONS.any { filename.lowercase().endsWith(it) }
 
                         items.add(GalleryItem(
                             promptId = promptId,
                             filename = filename,
                             subfolder = subfolder,
                             type = type,
-                            isVideo = true,
-                            index = index++,
-                            timestamp = timestamp
-                        ))
-                    }
-                }
-
-                // Check for images
-                val images = nodeOutput.optJSONArray("images")
-                if (images != null && images.length() > 0) {
-                    for (i in 0 until images.length()) {
-                        val imageInfo = images.optJSONObject(i) ?: continue
-                        val filename = imageInfo.optString("filename", "")
-                        if (filename.isEmpty()) continue
-
-                        // Skip if it's actually a video
-                        if (VIDEO_EXTENSIONS.any { filename.lowercase().endsWith(it) }) {
-                            val subfolder = imageInfo.optString("subfolder", "")
-                            val type = imageInfo.optString("type", "output")
-
-                            items.add(GalleryItem(
-                                promptId = promptId,
-                                filename = filename,
-                                subfolder = subfolder,
-                                type = type,
-                                isVideo = true,
-                                index = index++,
-                                timestamp = timestamp
-                            ))
-                            continue
-                        }
-
-                        val subfolder = imageInfo.optString("subfolder", "")
-                        val type = imageInfo.optString("type", "output")
-
-                        items.add(GalleryItem(
-                            promptId = promptId,
-                            filename = filename,
-                            subfolder = subfolder,
-                            type = type,
-                            isVideo = false,
+                            isVideo = isVideo,
                             index = index++,
                             timestamp = timestamp
                         ))
