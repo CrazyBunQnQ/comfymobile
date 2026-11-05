@@ -68,6 +68,7 @@ ComfyMobile is a fork of [ComfyChair](https://github.com/legal-hkr/comfychair) b
   - Output width and height are independent of reference media dimensions
   - Capacity comes from the workflow's mapped loaders, not a fixed model-specific limit
   - Built-in **Qwen Image 2.1 Reference** provides 16 image slots and an independent latent canvas
+  - Qwen REF2I follows the reference graph's QwenImage21Cache and Euler/simple sampling (25 steps, CFG 1). Choose **Qwen3-VL 8B** for conditioning; `pe_i2i` / `pe_t2i` models are prompt enhancers and must not be used as its CLIP encoder
   - Built-in **MiniMax H3 Reference Video** provides 9 image slots and 3 native video slots; generated audio is retained, reference audio is not connected
   - Select compatible diffusion, text encoder and video/image VAE models in the parameter sheet. H3's audio VAE remains a separate loader (`MiniMax/minimax_h3_audio_vae_fp32.safetensors`); duplicate the workflow to change that filename for another server
   - Enable **Show built-in workflows** in app settings if bundled workflows are hidden

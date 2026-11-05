@@ -1,16 +1,23 @@
 {
   "name": "Qwen Image 2.1 Reference",
-  "description": "Up to 16 reference images with an independent output canvas. Requires Qwen Image 2.1 diffusion, text encoder and VAE models.",
+  "description": "Up to 16 reference images with independent output dimensions. Use Qwen Image 2.1 diffusion, Qwen3-VL 8B conditioning encoder (not a PE prompt enhancer), and Qwen Image 2.1 VAE.",
   "defaults": {
     "width": 1024,
     "height": 1024,
-    "steps": 20,
-    "cfg": 4,
+    "steps": 25,
+    "cfg": 1,
     "sampler_name": "euler",
     "scheduler": "simple",
     "batch_size": 1,
     "negative_prompt": ""
   },
+  "notes": [
+    {
+      "id": 1,
+      "title": "Qwen Image 2.1 model selection",
+      "content": "The reference workflow uses qwen_image_2.1_int8_convrot.safetensors diffusion, qwen3vl_8b_int8_convrot.safetensors conditioning encoder, and qwen_image_2.1_vae_bf16.safetensors. Select matching installed models in the parameter sheet. Models containing pe_i2i or pe_t2i are prompt enhancers, not the conditioning encoder. Sampling follows the reference workflow: QwenImage21Cache auto/default, Euler/simple, 25 steps, CFG 1. Reference encoding resolution is 1024. The independent EmptyLatentImage determines output dimensions; the encoder's reference-sized latent is intentionally unused."
+    }
+  ],
   "nodes": {
     "1": {
       "class_type": "LoadImage",
@@ -130,13 +137,14 @@
       }
     },
     "23": {
-      "class_type": "ModelSamplingAuraFlow",
+      "class_type": "QwenImage21Cache",
       "inputs": {
         "model": [
           "20",
           0
         ],
-        "shift": 3
+        "device": "auto",
+        "dtype": "default"
       }
     },
     "24": {
@@ -220,7 +228,7 @@
       }
     },
     "25": {
-      "class_type": "EmptySD3LatentImage",
+      "class_type": "EmptyLatentImage",
       "inputs": {
         "width": "{{width}}",
         "height": "{{height}}",
