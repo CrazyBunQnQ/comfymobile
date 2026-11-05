@@ -1,0 +1,427 @@
+{
+  "name": "MiniMax H3 Reference Video",
+  "description": "Up to 9 images and 3 videos. Select H3 reference diffusion, MiniMax CLIP and video VAE. Audio VAE remains a separate loader; reference audio is not used.",
+  "defaults": {
+    "width": 512,
+    "height": 320,
+    "length": 124,
+    "frame_rate": 24,
+    "steps": 8,
+    "sampler_name": "res_multistep",
+    "scheduler": "simple"
+  },
+  "nodes": {
+    "1": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_1}}"
+      }
+    },
+    "2": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_2}}"
+      }
+    },
+    "3": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_3}}"
+      }
+    },
+    "4": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_4}}"
+      }
+    },
+    "5": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_5}}"
+      }
+    },
+    "6": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_6}}"
+      }
+    },
+    "7": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_7}}"
+      }
+    },
+    "8": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_8}}"
+      }
+    },
+    "9": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_9}}"
+      }
+    },
+    "10": {
+      "class_type": "UNETLoader",
+      "inputs": {
+        "unet_name": "{{unet_name}}",
+        "weight_dtype": "default"
+      }
+    },
+    "11": {
+      "class_type": "CLIPLoader",
+      "inputs": {
+        "clip_name": "{{clip_name}}",
+        "type": "minimax",
+        "device": "default"
+      }
+    },
+    "12": {
+      "class_type": "VAELoader",
+      "inputs": {
+        "vae_name": "{{vae_name}}"
+      }
+    },
+    "13": {
+      "class_type": "VAELoader",
+      "inputs": {
+        "vae_name": "MiniMax\\minimax_h3_audio_vae_fp32.safetensors"
+      }
+    },
+    "20": {
+      "class_type": "MiniMaxH3ReferenceToVideo",
+      "inputs": {
+        "clip": [
+          "11",
+          0
+        ],
+        "prompt": "{{positive_prompt}}",
+        "width": "{{width}}",
+        "height": "{{height}}",
+        "length": "{{length}}",
+        "ref_image_size": "match",
+        "vae": [
+          "12",
+          0
+        ],
+        "audio_vae": [
+          "13",
+          0
+        ],
+        "ref_images.ref_image_0": [
+          "1",
+          0
+        ],
+        "ref_images.ref_image_1": [
+          "2",
+          0
+        ],
+        "ref_images.ref_image_2": [
+          "3",
+          0
+        ],
+        "ref_images.ref_image_3": [
+          "4",
+          0
+        ],
+        "ref_images.ref_image_4": [
+          "5",
+          0
+        ],
+        "ref_images.ref_image_5": [
+          "6",
+          0
+        ],
+        "ref_images.ref_image_6": [
+          "7",
+          0
+        ],
+        "ref_images.ref_image_7": [
+          "8",
+          0
+        ],
+        "ref_images.ref_image_8": [
+          "9",
+          0
+        ],
+        "ref_videos.ref_video_0": [
+          "111",
+          0
+        ],
+        "ref_videos.ref_video_1": [
+          "112",
+          0
+        ],
+        "ref_videos.ref_video_2": [
+          "113",
+          0
+        ]
+      }
+    },
+    "21": {
+      "class_type": "BasicGuider",
+      "inputs": {
+        "model": [
+          "10",
+          0
+        ],
+        "conditioning": [
+          "20",
+          0
+        ]
+      }
+    },
+    "22": {
+      "class_type": "RandomNoise",
+      "inputs": {
+        "noise_seed": "{{seed}}"
+      }
+    },
+    "23": {
+      "class_type": "KSamplerSelect",
+      "inputs": {
+        "sampler_name": "{{sampler_name}}"
+      }
+    },
+    "24": {
+      "class_type": "BasicScheduler",
+      "inputs": {
+        "model": [
+          "10",
+          0
+        ],
+        "scheduler": "{{scheduler}}",
+        "steps": "{{steps}}",
+        "denoise": 1
+      }
+    },
+    "25": {
+      "class_type": "SamplerCustomAdvanced",
+      "inputs": {
+        "noise": [
+          "22",
+          0
+        ],
+        "guider": [
+          "21",
+          0
+        ],
+        "sampler": [
+          "23",
+          0
+        ],
+        "sigmas": [
+          "24",
+          0
+        ],
+        "latent_image": [
+          "20",
+          1
+        ]
+      }
+    },
+    "26": {
+      "class_type": "VAEDecodeTiled",
+      "inputs": {
+        "samples": [
+          "25",
+          0
+        ],
+        "vae": [
+          "12",
+          0
+        ],
+        "tile_size": 256,
+        "overlap": 64,
+        "temporal_size": 32,
+        "temporal_overlap": 8
+      }
+    },
+    "27": {
+      "class_type": "VAEDecodeAudio",
+      "inputs": {
+        "samples": [
+          "25",
+          0
+        ],
+        "vae": [
+          "13",
+          0
+        ]
+      }
+    },
+    "28": {
+      "class_type": "CreateVideo",
+      "inputs": {
+        "images": [
+          "26",
+          0
+        ],
+        "audio": [
+          "27",
+          0
+        ],
+        "fps": "{{frame_rate}}"
+      }
+    },
+    "29": {
+      "class_type": "SaveVideo",
+      "inputs": {
+        "video": [
+          "28",
+          0
+        ],
+        "filename_prefix": "ComfyMobile_REF2V",
+        "format": "mp4",
+        "format.codec": "h264"
+      }
+    },
+    "101": {
+      "class_type": "LoadVideo",
+      "inputs": {
+        "file": "{{reference_video_1}}"
+      }
+    },
+    "102": {
+      "class_type": "LoadVideo",
+      "inputs": {
+        "file": "{{reference_video_2}}"
+      }
+    },
+    "103": {
+      "class_type": "LoadVideo",
+      "inputs": {
+        "file": "{{reference_video_3}}"
+      }
+    },
+    "111": {
+      "class_type": "GetVideoComponents",
+      "inputs": {
+        "video": [
+          "101",
+          0
+        ]
+      }
+    },
+    "112": {
+      "class_type": "GetVideoComponents",
+      "inputs": {
+        "video": [
+          "102",
+          0
+        ]
+      }
+    },
+    "113": {
+      "class_type": "GetVideoComponents",
+      "inputs": {
+        "video": [
+          "103",
+          0
+        ]
+      }
+    }
+  },
+  "fieldMappings": {
+    "reference_image_1": {
+      "nodeId": "1",
+      "inputKey": "image"
+    },
+    "reference_image_2": {
+      "nodeId": "2",
+      "inputKey": "image"
+    },
+    "reference_image_3": {
+      "nodeId": "3",
+      "inputKey": "image"
+    },
+    "reference_image_4": {
+      "nodeId": "4",
+      "inputKey": "image"
+    },
+    "reference_image_5": {
+      "nodeId": "5",
+      "inputKey": "image"
+    },
+    "reference_image_6": {
+      "nodeId": "6",
+      "inputKey": "image"
+    },
+    "reference_image_7": {
+      "nodeId": "7",
+      "inputKey": "image"
+    },
+    "reference_image_8": {
+      "nodeId": "8",
+      "inputKey": "image"
+    },
+    "reference_image_9": {
+      "nodeId": "9",
+      "inputKey": "image"
+    },
+    "reference_video_1": {
+      "nodeId": "101",
+      "inputKey": "file"
+    },
+    "reference_video_2": {
+      "nodeId": "102",
+      "inputKey": "file"
+    },
+    "reference_video_3": {
+      "nodeId": "103",
+      "inputKey": "file"
+    },
+    "unet_name": {
+      "nodeId": "10",
+      "inputKey": "unet_name"
+    },
+    "clip_name": {
+      "nodeId": "11",
+      "inputKey": "clip_name"
+    },
+    "vae_name": {
+      "nodeId": "12",
+      "inputKey": "vae_name"
+    },
+    "positive_text": {
+      "nodeId": "20",
+      "inputKey": "prompt"
+    },
+    "width": {
+      "nodeId": "20",
+      "inputKey": "width"
+    },
+    "height": {
+      "nodeId": "20",
+      "inputKey": "height"
+    },
+    "length": {
+      "nodeId": "20",
+      "inputKey": "length"
+    },
+    "seed": {
+      "nodeId": "22",
+      "inputKey": "noise_seed"
+    },
+    "sampler_name": {
+      "nodeId": "23",
+      "inputKey": "sampler_name"
+    },
+    "scheduler": {
+      "nodeId": "24",
+      "inputKey": "scheduler"
+    },
+    "steps": {
+      "nodeId": "24",
+      "inputKey": "steps"
+    },
+    "fps": {
+      "nodeId": "28",
+      "inputKey": "fps"
+    }
+  }
+}

@@ -1,0 +1,399 @@
+{
+  "name": "Qwen Image 2.1 Reference",
+  "description": "Up to 16 reference images with an independent output canvas. Requires Qwen Image 2.1 diffusion, text encoder and VAE models.",
+  "defaults": {
+    "width": 1024,
+    "height": 1024,
+    "steps": 20,
+    "cfg": 4,
+    "sampler_name": "euler",
+    "scheduler": "simple",
+    "batch_size": 1,
+    "negative_prompt": ""
+  },
+  "nodes": {
+    "1": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_1}}"
+      }
+    },
+    "2": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_2}}"
+      }
+    },
+    "3": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_3}}"
+      }
+    },
+    "4": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_4}}"
+      }
+    },
+    "5": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_5}}"
+      }
+    },
+    "6": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_6}}"
+      }
+    },
+    "7": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_7}}"
+      }
+    },
+    "8": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_8}}"
+      }
+    },
+    "9": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_9}}"
+      }
+    },
+    "10": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_10}}"
+      }
+    },
+    "11": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_11}}"
+      }
+    },
+    "12": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_12}}"
+      }
+    },
+    "13": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_13}}"
+      }
+    },
+    "14": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_14}}"
+      }
+    },
+    "15": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_15}}"
+      }
+    },
+    "16": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{reference_image_16}}"
+      }
+    },
+    "20": {
+      "class_type": "UNETLoader",
+      "inputs": {
+        "unet_name": "{{unet_name}}",
+        "weight_dtype": "default"
+      }
+    },
+    "21": {
+      "class_type": "CLIPLoader",
+      "inputs": {
+        "clip_name": "{{clip_name}}",
+        "type": "qwen_image",
+        "device": "default"
+      }
+    },
+    "22": {
+      "class_type": "VAELoader",
+      "inputs": {
+        "vae_name": "{{vae_name}}"
+      }
+    },
+    "23": {
+      "class_type": "ModelSamplingAuraFlow",
+      "inputs": {
+        "model": [
+          "20",
+          0
+        ],
+        "shift": 3
+      }
+    },
+    "24": {
+      "class_type": "TextEncodeQwenImage21",
+      "inputs": {
+        "clip": [
+          "21",
+          0
+        ],
+        "prompt": "{{positive_prompt}}",
+        "negative_prompt": "{{negative_prompt}}",
+        "resolution": 1024,
+        "vae": [
+          "22",
+          0
+        ],
+        "images.image_1": [
+          "1",
+          0
+        ],
+        "images.image_2": [
+          "2",
+          0
+        ],
+        "images.image_3": [
+          "3",
+          0
+        ],
+        "images.image_4": [
+          "4",
+          0
+        ],
+        "images.image_5": [
+          "5",
+          0
+        ],
+        "images.image_6": [
+          "6",
+          0
+        ],
+        "images.image_7": [
+          "7",
+          0
+        ],
+        "images.image_8": [
+          "8",
+          0
+        ],
+        "images.image_9": [
+          "9",
+          0
+        ],
+        "images.image_10": [
+          "10",
+          0
+        ],
+        "images.image_11": [
+          "11",
+          0
+        ],
+        "images.image_12": [
+          "12",
+          0
+        ],
+        "images.image_13": [
+          "13",
+          0
+        ],
+        "images.image_14": [
+          "14",
+          0
+        ],
+        "images.image_15": [
+          "15",
+          0
+        ],
+        "images.image_16": [
+          "16",
+          0
+        ]
+      }
+    },
+    "25": {
+      "class_type": "EmptySD3LatentImage",
+      "inputs": {
+        "width": "{{width}}",
+        "height": "{{height}}",
+        "batch_size": "{{batch_size}}"
+      }
+    },
+    "26": {
+      "class_type": "KSampler",
+      "inputs": {
+        "model": [
+          "23",
+          0
+        ],
+        "positive": [
+          "24",
+          0
+        ],
+        "negative": [
+          "24",
+          1
+        ],
+        "latent_image": [
+          "25",
+          0
+        ],
+        "seed": "{{seed}}",
+        "steps": "{{steps}}",
+        "cfg": "{{cfg}}",
+        "sampler_name": "{{sampler_name}}",
+        "scheduler": "{{scheduler}}",
+        "denoise": 1
+      }
+    },
+    "27": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": [
+          "26",
+          0
+        ],
+        "vae": [
+          "22",
+          0
+        ]
+      }
+    },
+    "28": {
+      "class_type": "SaveImage",
+      "inputs": {
+        "images": [
+          "27",
+          0
+        ],
+        "filename_prefix": "ComfyMobile_REF2I"
+      }
+    }
+  },
+  "fieldMappings": {
+    "reference_image_1": {
+      "nodeId": "1",
+      "inputKey": "image"
+    },
+    "reference_image_2": {
+      "nodeId": "2",
+      "inputKey": "image"
+    },
+    "reference_image_3": {
+      "nodeId": "3",
+      "inputKey": "image"
+    },
+    "reference_image_4": {
+      "nodeId": "4",
+      "inputKey": "image"
+    },
+    "reference_image_5": {
+      "nodeId": "5",
+      "inputKey": "image"
+    },
+    "reference_image_6": {
+      "nodeId": "6",
+      "inputKey": "image"
+    },
+    "reference_image_7": {
+      "nodeId": "7",
+      "inputKey": "image"
+    },
+    "reference_image_8": {
+      "nodeId": "8",
+      "inputKey": "image"
+    },
+    "reference_image_9": {
+      "nodeId": "9",
+      "inputKey": "image"
+    },
+    "reference_image_10": {
+      "nodeId": "10",
+      "inputKey": "image"
+    },
+    "reference_image_11": {
+      "nodeId": "11",
+      "inputKey": "image"
+    },
+    "reference_image_12": {
+      "nodeId": "12",
+      "inputKey": "image"
+    },
+    "reference_image_13": {
+      "nodeId": "13",
+      "inputKey": "image"
+    },
+    "reference_image_14": {
+      "nodeId": "14",
+      "inputKey": "image"
+    },
+    "reference_image_15": {
+      "nodeId": "15",
+      "inputKey": "image"
+    },
+    "reference_image_16": {
+      "nodeId": "16",
+      "inputKey": "image"
+    },
+    "unet_name": {
+      "nodeId": "20",
+      "inputKey": "unet_name"
+    },
+    "clip_name": {
+      "nodeId": "21",
+      "inputKey": "clip_name"
+    },
+    "vae_name": {
+      "nodeId": "22",
+      "inputKey": "vae_name"
+    },
+    "positive_text": {
+      "nodeId": "24",
+      "inputKey": "prompt"
+    },
+    "negative_text": {
+      "nodeId": "24",
+      "inputKey": "negative_prompt"
+    },
+    "width": {
+      "nodeId": "25",
+      "inputKey": "width"
+    },
+    "height": {
+      "nodeId": "25",
+      "inputKey": "height"
+    },
+    "batch_size": {
+      "nodeId": "25",
+      "inputKey": "batch_size"
+    },
+    "seed": {
+      "nodeId": "26",
+      "inputKey": "seed"
+    },
+    "steps": {
+      "nodeId": "26",
+      "inputKey": "steps"
+    },
+    "cfg": {
+      "nodeId": "26",
+      "inputKey": "cfg"
+    },
+    "sampler_name": {
+      "nodeId": "26",
+      "inputKey": "sampler_name"
+    },
+    "scheduler": {
+      "nodeId": "26",
+      "inputKey": "scheduler"
+    }
+  }
+}

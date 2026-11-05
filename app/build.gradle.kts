@@ -13,8 +13,8 @@ android {
         minSdk = 33
         targetSdk = 36
         // CI test builds count up so each one installs as an update
-        versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()?.plus(1000) ?: 39
-        versionName = "v0.8.12"
+        versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()?.plus(1000) ?: 40
+        versionName = "v0.8.13"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -47,6 +47,14 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             signingConfig = signingConfigs.findByName("devRelease") ?: signingConfigs.getByName("debug")
+        }
+        // Sideloading build that coexists with an installed release of the app.
+        // The release applicationId is kept for the published variants.
+        create("refsmoke") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".refsmoke"
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {

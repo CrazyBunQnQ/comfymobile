@@ -2,7 +2,7 @@
 
 An unofficial, native Android UI for [ComfyUI](https://github.com/comfyanonymous/ComfyUI).
 
-**Current version**: v0.8.12
+**Current version**: v0.8.13
 
 [<img src="https://raw.githubusercontent.com/rubenpgrady/get-it-on-github/refs/heads/main/get-it-on-github.png"
     alt="Get it on GitHub"
@@ -67,6 +67,10 @@ ComfyMobile is a fork of [ComfyChair](https://github.com/legal-hkr/comfychair) b
   - Separate generation modes with ordered reference images; REF2V also accepts reference videos
   - Output width and height are independent of reference media dimensions
   - Capacity comes from the workflow's mapped loaders, not a fixed model-specific limit
+  - Built-in **Qwen Image 2.1 Reference** provides 16 image slots and an independent latent canvas
+  - Built-in **MiniMax H3 Reference Video** provides 9 image slots and 3 native video slots; generated audio is retained, reference audio is not connected
+  - Select compatible diffusion, text encoder and video/image VAE models in the parameter sheet. H3's audio VAE remains a separate loader (`MiniMax/minimax_h3_audio_vae_fp32.safetensors`); duplicate the workflow to change that filename for another server
+  - Enable **Show built-in workflows** in app settings if bundled workflows are hidden
   - Reference video files are streamed to ComfyUI's `/upload/image` endpoint with their original media MIME type
   - Per-server, per-workflow settings retain document URIs, not uploaded filenames or media bytes; unreadable documents must be replaced or removed
 
