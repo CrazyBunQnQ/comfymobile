@@ -147,7 +147,12 @@ fun ReferenceGenerationScreen(
     fun openResult() {
         val video = uiState.currentVideoUri
         if (video != null) context.startActivity(MediaViewerActivity.createSingleVideoIntent(context, video, generationViewModel.getHostname(), generationViewModel.getPort()))
-        else uiState.previewBitmap?.let { bitmap -> context.startActivity(MediaViewerActivity.createPreviewIntent(context, generationViewModel.getHostname(), generationViewModel.getPort(), bitmap, null, null, null)) }
+        else uiState.previewBitmap?.let { bitmap ->
+            context.startActivity(MediaViewerActivity.createPreviewIntent(
+                context, generationViewModel.getHostname(), generationViewModel.getPort(), bitmap,
+                uiState.currentImageFilename, uiState.currentImageSubfolder, uiState.currentImageType
+            ))
+        }
     }
 
     DisposableEffect(lifecycleOwner) {

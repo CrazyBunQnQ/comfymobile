@@ -69,6 +69,8 @@ ComfyMobile is a fork of [ComfyChair](https://github.com/legal-hkr/comfychair) b
   - Capacity comes from the workflow's mapped loaders, not a fixed model-specific limit
   - Built-in **Qwen Image 2.1 Reference** provides 16 image slots and an independent latent canvas
   - Qwen REF2I follows the reference graph's QwenImage21Cache and Euler/simple sampling (25 steps, CFG 1). Choose **Qwen3-VL 8B** for conditioning; `pe_i2i` / `pe_t2i` models are prompt enhancers and must not be used as its CLIP encoder
+  - Reference-tested Qwen configuration: `qwen_image_2.1_int8_convrot.safetensors` diffusion, `qwen3vl_8b_int8_convrot.safetensors` conditioning encoder (`qwen_image`), and `qwen_image_2.1_vae_bf16.safetensors`. The reference encoder uses resolution 1024; its reference-sized latent is unused, so the output canvas can be landscape even when all references are portrait
+  - Updating a bundled workflow does not overwrite saved per-workflow sampling/model choices. When moving from the earlier Qwen template, explicitly set 25 steps / CFG 1 and select the conditioning encoder above
   - Built-in **MiniMax H3 Reference Video** provides 9 image slots and 3 native video slots; generated audio is retained, reference audio is not connected
   - Select compatible diffusion, text encoder and video/image VAE models in the parameter sheet. H3's audio VAE remains a separate loader (`MiniMax/minimax_h3_audio_vae_fp32.safetensors`); duplicate the workflow to change that filename for another server
   - Enable **Show built-in workflows** in app settings if bundled workflows are hidden
@@ -85,6 +87,7 @@ ComfyMobile is a fork of [ComfyChair](https://github.com/legal-hkr/comfychair) b
   - Single-tap to toggle UI visibility (with system bars)
   - Quick actions: delete, save to gallery, share, view metadata
   - Metadata viewer showing generation parameters (prompt, model, seed, steps, etc.)
+  - REF2I previews retain the generated server file identity so the image viewer can retrieve PNG generation metadata, including after restoring a completed result
   - Optimized media caching for smooth transitions between items
 - **Gallery**:
   - View all generated images and videos with 2-column grid layout

@@ -38,6 +38,7 @@ import org.json.JSONObject
 import sh.hnet.comfychair.R
 import sh.hnet.comfychair.cache.MediaStateHolder
 import sh.hnet.comfychair.connection.ConnectionFailure
+import sh.hnet.comfychair.repository.GalleryRepository
 import sh.hnet.comfychair.ui.components.config.ReferenceConfig
 import sh.hnet.comfychair.util.UuidUtils
 import sh.hnet.comfychair.util.VideoUtils
@@ -127,6 +128,11 @@ data class ReferenceGenerationUiState(
     val previewBitmap: Bitmap? = null,
     val currentVideoUri: Uri? = null,
     val lastPromptId: String? = null,
+
+    // Server-side file info of the shown result (needed to read the generation metadata)
+    val currentImageFilename: String? = null,
+    val currentImageSubfolder: String? = null,
+    val currentImageType: String? = null,
 
     val widthError: String? = null,
     val heightError: String? = null,
@@ -656,11 +662,47 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
             ?.putString("${server}_lastPromptId", id)?.apply()
     }
 
+    /**
+     * Remember which server file the shown result came from, so the metadata can still be
+     * read after a restart. Scoped by server id like the rest of the reference state.
+     */
+    private fun rememberResultFile(promptId: String, filename: String, subfolder: String, type: String) {
+        val server = ConnectionManager.currentServerId ?: return
+        applicationContext?.getSharedPreferences(preferencesName(), Context.MODE_PRIVATE)?.edit()
+            ?.putString("${server}_lastResultPromptId", promptId)
+            ?.putString("${server}_lastResultFilename", filename)
+            ?.putString("${server}_lastResultSubfolder", subfolder)
+            ?.putString("${server}_lastResultType", type)
+            ?.apply()
+    }
+
     private fun restoreResult() {
         val context = applicationContext ?: return
         val server = ConnectionManager.currentServerId ?: return
-        val id = context.getSharedPreferences(preferencesName(), Context.MODE_PRIVATE).getString("${server}_lastPromptId", null)
-        _uiState.update { it.copy(previewBitmap = MediaStateHolder.getBitmap(previewKey, context), lastPromptId = id) }
+        val prefs = context.getSharedPreferences(preferencesName(), Context.MODE_PRIVATE)
+        val id = prefs.getString("${server}_lastPromptId", null)
+        val savedFile = prefs.getString("${server}_lastResultFilename", null)
+            ?.takeIf { prefs.getString("${server}_lastResultPromptId", null) == id }
+        val savedSubfolder = prefs.getString("${server}_lastResultSubfolder", "")
+        val savedType = prefs.getString("${server}_lastResultType", "output")
+        // The gallery is server scoped too, so it is a safe fallback for a file info that
+        // was not persisted (older state or a result restored from disk).
+        val galleryFile = id?.let { promptId ->
+            GalleryRepository.getInstance().galleryItems.value
+                .firstOrNull { it.promptId == promptId && !it.isVideo }
+        }
+        val filename = savedFile ?: galleryFile?.filename
+        val subfolder = savedFile?.let { savedSubfolder } ?: galleryFile?.subfolder.orEmpty()
+        val type = savedFile?.let { savedType } ?: galleryFile?.type ?: "output"
+        _uiState.update {
+            it.copy(
+                previewBitmap = MediaStateHolder.getBitmap(previewKey, context),
+                lastPromptId = id,
+                currentImageFilename = filename,
+                currentImageSubfolder = subfolder,
+                currentImageType = if (filename != null) type else null
+            )
+        }
         if (isVideoMode) viewModelScope.launch {
             val videoId = MediaStateHolder.getCurrentRef2vPromptId() ?: id ?: return@launch
             val uri = MediaStateHolder.getVideoUri(context, MediaStateHolder.MediaKey.Ref2vVideo(videoId))
@@ -674,7 +716,15 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
         generation.registerEventHandler(ownerId) { event ->
             when (event) {
                 is GenerationEvent.PreviewImage -> {
-                    _uiState.update { it.copy(previewBitmap = event.bitmap) }
+                    // A live preview is not a finished result: its file info no longer applies
+                    _uiState.update {
+                        it.copy(
+                            previewBitmap = event.bitmap,
+                            currentImageFilename = null,
+                            currentImageSubfolder = null,
+                            currentImageType = null
+                        )
+                    }
                     MediaStateHolder.putBitmap(previewKey, event.bitmap, applicationContext)
                 }
                 is GenerationEvent.ImageGenerated -> fetchResult(event.promptId, generation)
@@ -707,9 +757,22 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
             else client.fetchImage(image.filename, image.subfolder, image.type) { bitmap, failure ->
                 viewModelScope.launch {
                     if (ConnectionManager.currentServerId == server) {
-                        _uiState.update { it.copy(previewBitmap = bitmap ?: it.previewBitmap, isFetching = false) }
-                        if (bitmap != null) { MediaStateHolder.putBitmap(previewKey, bitmap, context); generation.completeGeneration(id) }
-                        else if (failure == ConnectionFailure.STALLED || failure == ConnectionFailure.AUTHENTICATION) ConnectionManager.showConnectionAlert(context, failure)
+                        _uiState.update { it.copy(isFetching = false) }
+                        if (bitmap != null) {
+                            _uiState.update {
+                                it.copy(
+                                    previewBitmap = bitmap,
+                                    currentImageFilename = image.filename,
+                                    currentImageSubfolder = image.subfolder,
+                                    currentImageType = image.type
+                                )
+                            }
+                            rememberResultFile(id, image.filename, image.subfolder, image.type)
+                            MediaStateHolder.putBitmap(previewKey, bitmap, context)
+                            generation.completeGeneration(id)
+                        } else if (failure == ConnectionFailure.STALLED || failure == ConnectionFailure.AUTHENTICATION) {
+                            ConnectionManager.showConnectionAlert(context, failure)
+                        }
                     }
                 }
             }
