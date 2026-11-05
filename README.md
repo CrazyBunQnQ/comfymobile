@@ -72,6 +72,7 @@ ComfyMobile is a fork of [ComfyChair](https://github.com/legal-hkr/comfychair) b
   - Reference-tested Qwen configuration: `qwen_image_2.1_int8_convrot.safetensors` diffusion, `qwen3vl_8b_int8_convrot.safetensors` conditioning encoder (`qwen_image`), and `qwen_image_2.1_vae_bf16.safetensors`. The reference encoder uses resolution 1024; its reference-sized latent is unused, so the output canvas can be landscape even when all references are portrait
   - Updating a bundled workflow does not overwrite saved per-workflow sampling/model choices. When moving from the earlier Qwen template, explicitly set 25 steps / CFG 1 and select the conditioning encoder above
   - Built-in **MiniMax H3 Reference Video** provides 9 image slots and 3 native video slots; generated audio is retained, reference audio is not connected
+  - H3 prompts identify image references with `<Picture 1>` and video references with `<Video 1>` (one-based numbering per media kind). Image-only, video-only, and mixed selections are supported; unfilled loaders are pruned before submission. Its 512×320 / 124-frame / 24-fps / 8-step defaults are a smoke configuration, not a final-quality preset
   - Select compatible diffusion, text encoder and video/image VAE models in the parameter sheet. H3's audio VAE remains a separate loader (`MiniMax/minimax_h3_audio_vae_fp32.safetensors`); duplicate the workflow to change that filename for another server
   - Enable **Show built-in workflows** in app settings if bundled workflows are hidden
   - Reference video files are streamed to ComfyUI's `/upload/image` endpoint with their original media MIME type
@@ -88,6 +89,8 @@ ComfyMobile is a fork of [ComfyChair](https://github.com/legal-hkr/comfychair) b
   - Quick actions: delete, save to gallery, share, view metadata
   - Metadata viewer showing generation parameters (prompt, model, seed, steps, etc.)
   - REF2I previews retain the generated server file identity so the image viewer can retrieve PNG generation metadata, including after restoring a completed result
+  - Video preview thumbnails and dimensions follow the current video URI, so replacing a result does not retain the previous video's frame or aspect ratio
+  - Active generations also check completed server history, so a missed WebSocket completion notification does not leave the result preview waiting for the app to resume
   - Optimized media caching for smooth transitions between items
 - **Gallery**:
   - View all generated images and videos with 2-column grid layout

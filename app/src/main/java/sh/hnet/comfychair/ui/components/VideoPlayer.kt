@@ -108,17 +108,17 @@ fun VideoPlayer(
 
     // Initialize thumbnail synchronously from cache to avoid black flash during transitions
     // This ensures the thumbnail is available on the very first composition
-    val initialThumbnail = remember(cacheKey) {
+    val initialThumbnail = remember(videoUri, cacheKey) {
         cacheKey?.let { MediaCache.getBitmap(it) }
     }
-    var thumbnail by remember(cacheKey) { mutableStateOf(initialThumbnail) }
+    var thumbnail by remember(videoUri, cacheKey) { mutableStateOf(initialThumbnail) }
 
     // Video dimensions - also check cache synchronously for instant display
-    val cachedDimensions = remember(cacheKey) {
+    val cachedDimensions = remember(videoUri, cacheKey) {
         cacheKey?.let { MediaCache.getVideoDimensions(it) }
     }
-    var videoWidth by remember(cacheKey) { mutableStateOf(cachedDimensions?.width ?: 0) }
-    var videoHeight by remember(cacheKey) { mutableStateOf(cachedDimensions?.height ?: 0) }
+    var videoWidth by remember(videoUri, cacheKey) { mutableStateOf(cachedDimensions?.width ?: 0) }
+    var videoHeight by remember(videoUri, cacheKey) { mutableStateOf(cachedDimensions?.height ?: 0) }
 
     // Zoom/pan state
     val scaleAnimatable = remember { Animatable(1f) }
@@ -175,8 +175,7 @@ fun VideoPlayer(
                 }
             }
         }
-        // Note: We intentionally don't reset thumbnail/dimensions when videoUri becomes null.
-        // The cached thumbnail should persist to avoid black flashes during transitions.
+        // Media identity keys reset thumbnail and dimensions before a new URI is loaded.
     }
 
     // Calculate video display size for zoom calculations

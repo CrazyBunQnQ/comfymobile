@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import sh.hnet.comfychair.R
@@ -108,6 +109,7 @@ fun ReferenceGenerationScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val lifecycleState by lifecycleOwner.lifecycle.currentStateAsState()
     val presetViewModel: PromptPresetViewModel = viewModel()
     val uiState by referenceViewModel.uiState.collectAsState()
     val generationState by generationViewModel.generationState.collectAsState()
@@ -306,7 +308,7 @@ fun ReferenceGenerationScreen(
                     }
                 }
             } else if (uiState.currentVideoUri != null) {
-                VideoPlayer(uiState.currentVideoUri, Modifier.fillMaxSize(), isActive = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED), scaleMode = VideoScaleMode.FIT)
+                VideoPlayer(uiState.currentVideoUri, Modifier.fillMaxSize(), isActive = lifecycleState.isAtLeast(Lifecycle.State.RESUMED), scaleMode = VideoScaleMode.FIT)
             } else if (uiState.previewBitmap != null) {
                 Image(uiState.previewBitmap!!.asImageBitmap(), stringResource(R.string.content_description_preview), Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
             } else PreviewPlaceholder(stringResource(R.string.content_description_preview))

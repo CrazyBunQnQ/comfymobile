@@ -314,6 +314,7 @@ class GenerationViewModel : ViewModel() {
                             ownerId = owner,
                             contentType = contentType
                         )
+                        startCompletionPolling(promptId, contentType)
 
                         // If handler doesn't match new owner, clear it so correct screen can register
                         if (activeEventHandlerOwnerId != null && activeEventHandlerOwnerId != owner) {
@@ -683,6 +684,7 @@ class GenerationViewModel : ViewModel() {
                     )
                     // Save state immediately after starting
                     applicationContext?.let { saveGenerationState(it) }
+                    startCompletionPolling(promptId, generationContentType)
                 }
                 mainHandler.post { onResult(true, promptId, null) }
             } else {
@@ -768,14 +770,14 @@ class GenerationViewModel : ViewModel() {
 
     /**
      * Start polling for generation completion.
-     * Used when resuming a generation after app restart, since WebSocket
-     * won't receive progress updates for jobs submitted with a different client ID.
+     * Also covers live jobs whose WebSocket completion notification is lost.
      */
     private fun startCompletionPolling(promptId: String, contentType: ContentType) {
-        if (completionPollingJob?.isActive == true) return
+        stopCompletionPolling()
 
         completionPollingJob = viewModelScope.launch {
             while (isActive) {
+                if (_generationState.value.promptId != promptId) break
                 delay(COMPLETION_POLLING_INTERVAL_MS)
                 if (!isActive) break
                 pollForCompletion(promptId, contentType)
@@ -796,20 +798,19 @@ class GenerationViewModel : ViewModel() {
      */
     private fun pollForCompletion(promptId: String, contentType: ContentType) {
         val client = comfyUIClient ?: return
+        val serverId = ConnectionManager.currentServerId
 
         client.fetchHistory(promptId) { historyJson ->
             if (historyJson == null) return@fetchHistory
+            val state = _generationState.value
+            if (comfyUIClient !== client || ConnectionManager.currentServerId != serverId ||
+                !state.isGenerating || state.promptId != promptId) return@fetchHistory
 
-            val outputs = historyJson.optJSONObject(promptId)?.optJSONObject("outputs")
-            if (outputs != null && outputs.length() > 0) {
-                val event = if (contentType == ContentType.VIDEO) {
-                    GenerationEvent.VideoGenerated(promptId)
-                } else {
-                    GenerationEvent.ImageGenerated(promptId)
-                }
-                dispatchEvent(event)
-                completeGeneration(promptId)
-                // Gallery refresh handled by JobRegistry.markCompleted() via WebSocket event
+            val entry = historyJson.optJSONObject(promptId) ?: return@fetchHistory
+            val outputs = entry.optJSONObject("outputs")
+            if (entry.optJSONObject("status")?.optBoolean("completed") == true &&
+                outputs != null && outputs.length() > 0) {
+                dispatchCompletionEvent(promptId, contentType)
             }
         }
     }
@@ -905,6 +906,7 @@ class GenerationViewModel : ViewModel() {
         // Clear JobRegistry state - ensures executingOwnerId is reset even when
         // WebSocket events were missed (app was in background during completion)
         JobRegistry.markCompleted(promptId)
+        applicationContext?.let { JobRegistry.saveState(it) }
     }
 
     /**
