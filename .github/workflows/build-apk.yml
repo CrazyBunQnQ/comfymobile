@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [ "feature/**" ]
+    branches: [ "**" ]
   workflow_dispatch:
 
 permissions:
@@ -52,7 +52,7 @@ jobs:
           git tag -f dev-latest
           git push -f origin dev-latest
           gh release view dev-latest >/dev/null 2>&1 || \
-            gh release create dev-latest --prerelease --title "Dev build (latest)" --notes "Latest test build from feature branches."
+            gh release create dev-latest --prerelease --title "Dev build (latest)" --notes "Latest test build from branch pushes."
           gh release edit dev-latest --notes "Latest test build: ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}"
           gh release upload dev-latest comfymobile-dev.apk --clobber
       # On failure, publish the compiler errors so they can be read without logging in

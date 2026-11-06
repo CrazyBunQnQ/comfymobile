@@ -218,6 +218,8 @@ ComfyMobile is a fork of [ComfyChair](https://github.com/legal-hkr/comfychair) b
    ./gradlew installDebug
    ```
 
+The **Build APK** GitHub Actions workflow automatically builds a dev APK on pushes to any branch (not tags), and can also be run manually via **Actions → Build APK → Run workflow**. Successful builds upload `comfymobile-dev.apk` as a workflow artifact and publish it to the `dev-latest` prerelease.
+
 ### Running tests
 
 ```bash
