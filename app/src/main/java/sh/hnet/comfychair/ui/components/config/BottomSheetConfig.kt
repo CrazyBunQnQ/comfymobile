@@ -127,7 +127,8 @@ data class ParameterConfig(
     val batchSize: NumericField? = null,
     val upscaleMethod: DropdownField? = null,
     val scaleBy: NumericField? = null,
-    val stopAtClipLayer: NumericField? = null
+    val stopAtClipLayer: NumericField? = null,
+    val durationSeconds: NumericField? = null
 )
 
 /**

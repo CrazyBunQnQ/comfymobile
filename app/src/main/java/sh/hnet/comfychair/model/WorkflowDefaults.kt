@@ -34,7 +34,8 @@ data class WorkflowDefaults(
     val batchSize: Int? = null,
     val upscaleMethod: String? = null,
     val scaleBy: Float? = null,
-    val stopAtClipLayer: Int? = null
+    val stopAtClipLayer: Int? = null,
+    val durationSeconds: Int? = null
 ) {
     companion object {
         fun fromJson(jsonObject: JSONObject?): WorkflowDefaults {
@@ -51,6 +52,7 @@ data class WorkflowDefaults(
                 megapixels = jsonObject.optDouble("megapixels").takeIf { !it.isNaN() }?.toFloat(),
                 length = jsonObject.optInt("length").takeIf { it > 0 },
                 frameRate = jsonObject.optInt("frame_rate").takeIf { it > 0 },
+                durationSeconds = jsonObject.optInt("duration_seconds").takeIf { it > 0 },
                 // Advanced generation parameter defaults
                 seed = jsonObject.optLong("seed", -1).takeIf { it >= 0 },
                 denoise = jsonObject.optDouble("denoise").takeIf { !it.isNaN() }?.toFloat(),
@@ -73,6 +75,7 @@ data class WorkflowDefaults(
                 defaults.megapixels?.let { put("megapixels", it.toDouble()) }
                 defaults.length?.let { put("length", it) }
                 defaults.frameRate?.let { put("frame_rate", it) }
+                defaults.durationSeconds?.let { put("duration_seconds", it) }
                 // Advanced generation parameter defaults
                 defaults.seed?.let { put("seed", it) }
                 defaults.denoise?.let { put("denoise", it.toDouble()) }

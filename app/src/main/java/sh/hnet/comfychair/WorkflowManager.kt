@@ -16,6 +16,7 @@ import sh.hnet.comfychair.util.UuidUtils
 import sh.hnet.comfychair.util.ValidationUtils
 import sh.hnet.comfychair.workflow.TemplateKeyRegistry
 import sh.hnet.comfychair.workflow.ReferenceWorkflowSupport
+import sh.hnet.comfychair.workflow.ReferenceVideoDuration
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -1615,7 +1616,7 @@ object WorkflowManager {
             "width" to (saved?.width ?: defaults.width ?: if (video) 832 else 1024),
             "height" to (saved?.height ?: defaults.height ?: if (video) 480 else 1024),
             "length" to (saved?.length ?: defaults.length ?: 33),
-            "frame_rate" to (saved?.frameRate ?: defaults.frameRate ?: 16),
+            "frame_rate" to (saved?.frameRate ?: defaults.frameRate ?: 24),
             "steps" to (saved?.steps ?: defaults.steps ?: 20),
             "cfg" to (saved?.cfg ?: defaults.cfg ?: 7.0f),
             "sampler_name" to (saved?.samplerName ?: defaults.samplerName ?: "euler"),
@@ -1624,6 +1625,12 @@ object WorkflowManager {
             "seed" to (values["seed"] ?: if (saved?.randomSeed != false) (0L..999999999999L).random() else (saved.seed ?: 0L))
         )
         resolved.putAll(values)
+        if (video && !values.containsKey("duration_seconds")) {
+            val fps = (resolved.getValue("frame_rate") as Number).toInt()
+            resolved["duration_seconds"] = if (saved?.durationSeconds != null || saved?.length != null) {
+                ReferenceVideoDuration.restoredSeconds(saved.durationSeconds, saved.length, fps)
+            } else ReferenceVideoDuration.restoredSeconds(defaults.durationSeconds, defaults.length, fps)
+        }
         val edited = applyNodeAttributeEdits(workflow.jsonContent, workflowId)
         val prepared = ReferenceWorkflowSupport.prepare(
             JSONObject(edited), workflow.type, resolved, uploadedReferences, ConnectionManager.nodeTypeRegistry

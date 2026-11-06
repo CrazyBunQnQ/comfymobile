@@ -61,7 +61,8 @@ data class WorkflowValues(
     val scaleBy: Float? = null,
     val stopAtClipLayer: Int? = null,
     val referenceImageUris: List<String> = emptyList(),
-    val referenceVideoUris: List<String> = emptyList()
+    val referenceVideoUris: List<String> = emptyList(),
+    val durationSeconds: Int? = null
 ) {
     companion object {
         fun fromJson(jsonString: String): WorkflowValues {
@@ -77,6 +78,7 @@ data class WorkflowValues(
                 megapixels = json.optDouble("megapixels").takeIf { !it.isNaN() }?.toFloat(),
                 length = json.optInt("length").takeIf { it > 0 },
                 frameRate = json.optInt("frameRate").takeIf { it > 0 },
+                durationSeconds = json.optInt("duration_seconds").takeIf { it > 0 },
                 model = json.optString("model").takeIf { it.isNotEmpty() },
                 unetModel = json.optString("unetModel").takeIf { it.isNotEmpty() },
                 loraModel = json.optString("loraModel").takeIf { it.isNotEmpty() },
@@ -124,6 +126,7 @@ data class WorkflowValues(
                 values.megapixels?.let { put("megapixels", it.toDouble()) }
                 values.length?.let { put("length", it) }
                 values.frameRate?.let { put("frameRate", it) }
+                values.durationSeconds?.let { put("duration_seconds", it) }
                 values.model?.let { put("model", it) }
                 values.unetModel?.let { put("unetModel", it) }
                 values.loraModel?.let { put("loraModel", it) }

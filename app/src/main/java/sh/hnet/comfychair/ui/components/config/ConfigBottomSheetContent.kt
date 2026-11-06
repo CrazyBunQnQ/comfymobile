@@ -40,6 +40,10 @@ import sh.hnet.comfychair.ui.components.shared.ReferenceImageThumbnail
 import sh.hnet.comfychair.ui.components.shared.ScaleByField
 import sh.hnet.comfychair.ui.components.shared.SeedRow
 import sh.hnet.comfychair.ui.components.shared.StepsCfgRow
+import sh.hnet.comfychair.ui.components.shared.StepperInputRow
+
+import sh.hnet.comfychair.workflow.WorkflowConstraintsProvider
+
 import sh.hnet.comfychair.viewmodel.ImageToImageMode
 
 /**
@@ -245,7 +249,8 @@ private fun ParametersSection(params: ParameterConfig, workflowName: String) {
             params.batchSize?.takeIf { it.isVisible },
             params.upscaleMethod?.takeIf { it.isVisible },
             params.scaleBy?.takeIf { it.isVisible },
-            params.stopAtClipLayer?.takeIf { it.isVisible }
+            params.stopAtClipLayer?.takeIf { it.isVisible },
+            params.durationSeconds?.takeIf { it.isVisible }
         ).isNotEmpty()
     }
 
@@ -304,7 +309,7 @@ private fun ParametersSection(params: ParameterConfig, workflowName: String) {
     // Length/FPS row
     val showLength = params.length?.isVisible == true
     val showFps = params.fps?.isVisible == true
-    if (showLength || showFps) {
+    if (showLength || (showFps && params.durationSeconds?.isVisible != true)) {
         LengthFpsRow(
             workflowName = workflowName,
             length = params.length?.value ?: "",
@@ -315,6 +320,35 @@ private fun ParametersSection(params: ParameterConfig, workflowName: String) {
             onFpsChange = params.fps?.onValueChange ?: {},
             fpsError = params.fps?.error,
             showFps = showFps
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+    }
+
+    params.durationSeconds?.takeIf { it.isVisible }?.let { duration ->
+        val showFps = params.fps?.isVisible == true
+        val fpsConstraints = WorkflowConstraintsProvider.rememberConstraints("fps", workflowName)
+        val durationConstraints = WorkflowConstraintsProvider.rememberConstraints("length", workflowName)
+        val fpsValue = params.fps?.value?.toFloatOrNull()?.takeIf { it > 0f } ?: 1f
+        val maxDuration = (durationConstraints.max / fpsValue).coerceAtLeast(1f)
+        StepperInputRow(
+            value1 = duration.value,
+            label1 = stringResource(R.string.label_duration_seconds),
+            onValue1Change = duration.onValueChange,
+            error1 = duration.error,
+            showField1 = true,
+            min1 = 1f,
+            max1 = maxDuration,
+            step1 = 1f,
+            decimalPlaces1 = 0,
+            value2 = params.fps?.value ?: "",
+            label2 = stringResource(R.string.label_fps),
+            onValue2Change = params.fps?.onValueChange ?: {},
+            error2 = params.fps?.error,
+            showField2 = showFps,
+            min2 = fpsConstraints.min,
+            max2 = fpsConstraints.max,
+            step2 = fpsConstraints.step,
+            decimalPlaces2 = fpsConstraints.decimalPlaces
         )
         Spacer(modifier = Modifier.height(12.dp))
     }

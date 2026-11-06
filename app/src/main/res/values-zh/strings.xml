@@ -329,6 +329,7 @@
     <string name="workflow_section_ttv">文生视频</string>
     <string name="workflow_section_itv">图生视频</string>
     <string name="workflow_section_empty">暂无工作流</string>
+    <string name="label_duration_seconds">时长（秒）</string>
     <string name="label_workflow_built_in">内置</string>
     <string name="label_workflow_name">名称</string>
     <string name="label_workflow_description">描述</string>

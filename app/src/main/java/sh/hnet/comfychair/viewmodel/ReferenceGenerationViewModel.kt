@@ -44,6 +44,7 @@ import sh.hnet.comfychair.util.UuidUtils
 import sh.hnet.comfychair.util.VideoUtils
 import sh.hnet.comfychair.workflow.ReferenceMediaKind
 import sh.hnet.comfychair.workflow.ReferenceWorkflowSupport
+import sh.hnet.comfychair.workflow.ReferenceVideoDuration
 import sh.hnet.comfychair.workflow.WorkflowConstraintsProvider
 
 /** Workflow option for the shared reference generation screen. */
@@ -81,8 +82,8 @@ data class ReferenceGenerationUiState(
 
     val width: String = "1024",
     val height: String = "1024",
-    val length: String = "33",
-    val fps: String = "16",
+    val durationSeconds: String = "5",
+    val fps: String = "24",
     override val steps: String = "20",
     override val cfg: String = "7.0",
     override val sampler: String = "euler",
@@ -136,7 +137,7 @@ data class ReferenceGenerationUiState(
 
     val widthError: String? = null,
     val heightError: String? = null,
-    val lengthError: String? = null,
+    val durationError: String? = null,
     val fpsError: String? = null,
     override val stepsError: String? = null,
     override val cfgError: String? = null,
@@ -232,6 +233,11 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
 
         val state = _uiState.value
         val savedModel = saved?.model
+        val fps = saved?.frameRate ?: defaults?.frameRate ?: 24
+        val duration = ReferenceVideoDuration.restoredSeconds(
+            saved?.durationSeconds, saved?.length, fps
+        ).takeIf { saved?.durationSeconds != null || saved?.length != null }
+            ?: ReferenceVideoDuration.restoredSeconds(defaults?.durationSeconds, defaults?.length, fps)
         _uiState.value = state.copy(
             selectedWorkflow = workflow.name,
             selectedWorkflowId = workflow.id,
@@ -245,8 +251,8 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
             negativePrompt = saved?.negativePrompt ?: defaults?.negativePrompt.orEmpty(),
             width = saved?.width?.toString() ?: defaults?.width?.toString() ?: defaultWidth(),
             height = saved?.height?.toString() ?: defaults?.height?.toString() ?: defaultHeight(),
-            length = saved?.length?.toString() ?: defaults?.length?.toString() ?: "33",
-            fps = saved?.frameRate?.toString() ?: defaults?.frameRate?.toString() ?: "16",
+            durationSeconds = duration.toString(),
+            fps = fps.toString(),
             steps = saved?.steps?.toString() ?: defaults?.steps?.toString() ?: "20",
             cfg = saved?.cfg?.toString() ?: defaults?.cfg?.toString() ?: "7.0",
             sampler = saved?.samplerName ?: defaults?.samplerName ?: "euler",
@@ -294,8 +300,8 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
             filteredLoras = WorkflowManager.getNodeSpecificOptionsForField(workflow.id, "lora_name"),
             widthError = validateNumber("width", saved?.width?.toString() ?: defaults?.width?.toString() ?: defaultWidth(), workflow.name),
             heightError = validateNumber("height", saved?.height?.toString() ?: defaults?.height?.toString() ?: defaultHeight(), workflow.name),
-            lengthError = if (capabilities.hasLength) validateNumber("length", saved?.length?.toString() ?: defaults?.length?.toString() ?: "33", workflow.name) else null,
-            fpsError = if (capabilities.hasFrameRate) validateNumber("frame_rate", saved?.frameRate?.toString() ?: defaults?.frameRate?.toString() ?: "16", workflow.name) else null
+            durationError = if (capabilities.hasLength) validateDuration(duration.toString(), fps.toString(), workflow.name) else null,
+            fpsError = if (capabilities.hasFrameRate) validateNumber("frame_rate", fps.toString(), workflow.name) else null
         )
     }
 
@@ -381,7 +387,7 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
             WorkflowValues(
                 width = state.width.toIntOrNull(),
                 height = state.height.toIntOrNull(),
-                length = state.length.toIntOrNull(),
+                durationSeconds = if (isVideoMode) state.durationSeconds.toIntOrNull() else null,
                 frameRate = state.fps.toIntOrNull(),
                 steps = state.steps.toIntOrNull(),
                 cfg = state.cfg.toFloatOrNull(),
@@ -449,8 +455,13 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
 
     fun onWidthChange(value: String) = update { it.copy(width = value, widthError = validateNumber("width", value)) }
     fun onHeightChange(value: String) = update { it.copy(height = value, heightError = validateNumber("height", value)) }
-    fun onLengthChange(value: String) = update { it.copy(length = value, lengthError = validateNumber("length", value)) }
-    fun onFpsChange(value: String) = update { it.copy(fps = value, fpsError = validateNumber("frame_rate", value)) }
+    fun onDurationChange(value: String) = update {
+        it.copy(durationSeconds = value, durationError = validateDuration(value, it.fps))
+    }
+    fun onFpsChange(value: String) = update {
+        it.copy(fps = value, fpsError = validateNumber("frame_rate", value),
+            durationError = if (it.capabilities.hasLength) validateDuration(it.durationSeconds, value) else null)
+    }
     fun onStepsChange(value: String) = update { it.copy(steps = value, stepsError = ValidationUtils.validateSteps(value, applicationContext)) }
     fun onCfgChange(value: String) = update { it.copy(cfg = value, cfgError = ValidationUtils.validateCfg(value, applicationContext)) }
     fun onSeedChange(value: String) = update { it.copy(seed = value, seedError = ValidationUtils.validateSeed(value, applicationContext)) }
@@ -547,6 +558,14 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
             applicationContext?.getString(R.string.error_invalid_number) ?: "Invalid number" else null
     }
 
+    private fun validateDuration(value: String, fps: String, workflow: String = _uiState.value.selectedWorkflow): String? {
+        val frames = runCatching { ReferenceVideoDuration.frameCount(value.toInt(), fps.toInt()) }.getOrNull()
+            ?: return applicationContext?.getString(R.string.error_invalid_number) ?: "Invalid number"
+        val constraints = WorkflowConstraintsProvider.getConstraints("length", workflow)
+        return if (frames < constraints.min || frames > constraints.max)
+            applicationContext?.getString(R.string.error_invalid_number) ?: "Invalid number" else null
+    }
+
     fun setWidthAndHeight(width: String, height: String) {
         _uiState.update {
             it.copy(
@@ -569,7 +588,7 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
         return !state.isUploading && state.invalidReferenceUris.isEmpty() &&
             (state.referenceImages.isNotEmpty() || (isVideoMode && state.referenceVideos.isNotEmpty())) &&
             state.positivePrompt.isNotBlank() && state.selectedWorkflowId.isNotEmpty() &&
-            state.widthError == null && state.heightError == null && state.lengthError == null &&
+            state.widthError == null && state.heightError == null && state.durationError == null &&
             state.fpsError == null && state.stepsError == null && state.cfgError == null &&
             state.seedError == null && state.denoiseError == null && state.batchSizeError == null &&
             state.scaleByError == null && state.stopAtClipLayerError == null
@@ -621,7 +640,7 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
                 val values = mapOf<String, Any>(
                     "positive_prompt" to snapshot.positivePrompt, "negative_prompt" to snapshot.negativePrompt,
                     "width" to snapshot.width.toInt(), "height" to snapshot.height.toInt(),
-                    "length" to snapshot.length.toInt(), "frame_rate" to snapshot.fps.toInt(),
+                    "duration_seconds" to snapshot.durationSeconds.toInt(), "frame_rate" to snapshot.fps.toInt(),
                     "steps" to snapshot.steps.toInt(), "cfg" to snapshot.cfg.toDouble(),
                     "seed" to seed, "sampler_name" to snapshot.sampler, "scheduler" to snapshot.scheduler,
                     "denoise" to snapshot.denoise.toDouble(), "batch_size" to snapshot.batchSize.toInt(),
@@ -864,18 +883,17 @@ fun ReferenceGenerationUiState.toBottomSheetConfig(
             error = heightError,
             isVisible = true
         ),
-        lengthField = sh.hnet.comfychair.ui.components.config.NumericField(
-            value = length,
-            onValueChange = callbacks.onLengthChange ?: {},
-            error = lengthError,
-            isVisible = capabilities.hasLength
-        ),
         fpsField = sh.hnet.comfychair.ui.components.config.NumericField(
             value = fps,
             onValueChange = callbacks.onFpsChange ?: {},
             error = fpsError,
             isVisible = capabilities.hasFrameRate
         )
-    ),
+    ).copy(durationSeconds = sh.hnet.comfychair.ui.components.config.NumericField(
+        value = durationSeconds,
+        onValueChange = callbacks.onLengthChange ?: {},
+        error = durationError,
+        isVisible = capabilities.hasLength
+    )),
     lora = buildCommonLoraConfig(this, callbacks)
 )

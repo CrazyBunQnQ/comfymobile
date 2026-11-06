@@ -252,6 +252,12 @@ object ReferenceWorkflowSupport {
         val json = JSONObject(template.toString())
         val nodes = json.optJSONObject("nodes") ?: json
         val slots = findSlots(json, type).getOrThrow()
+        val resolved = values.toMutableMap()
+        if (type == WorkflowType.REF2V && values["duration_seconds"] != null) {
+            val seconds = values.getValue("duration_seconds").toString().toInt()
+            val fps = values.getValue("frame_rate").toString().toInt()
+            resolved["length"] = ReferenceVideoDuration.frameCount(seconds, fps)
+        }
         require(uploads.isNotEmpty()) { "Select at least one reference" }
         require(uploads.keys.all { key -> slots.any { it.key == key } }) { "Uploaded reference has no mapped slot" }
         for (kind in ReferenceMediaKind.entries) {
@@ -290,7 +296,7 @@ object ReferenceWorkflowSupport {
                 val match = placeholder.matchEntire(value) ?: continue
                 val name = match.groupValues[1]
                 require(parseKey(name) == null) { "Node $id.$key: unreplaced reference placeholder" }
-                val replacement = values[name] ?: error("Node $id.$key: missing value $name")
+                val replacement = resolved[name] ?: error("Node $id.$key: missing value $name")
                 require(replacement !is String || replacement.isNotEmpty() || name == "negative_prompt") { "Node $id.$key: missing value $name" }
                 inputs.put(key, replacement)
             }

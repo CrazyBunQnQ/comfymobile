@@ -4,7 +4,7 @@
   "defaults": {
     "width": 512,
     "height": 320,
-    "length": 124,
+    "duration_seconds": 5,
     "frame_rate": 24,
     "steps": 8,
     "sampler_name": "res_multistep",
@@ -14,7 +14,7 @@
     {
       "id": 1,
       "title": "MiniMax H3 reference prompting",
-      "content": "Refer to selected images as <Picture 1>, <Picture 2>, etc., and videos as <Video 1>, <Video 2>, etc. Numbering starts at 1 independently for each media kind. Select at least one image or video; unfilled loaders are removed before submission. Output width and height are independent of reference dimensions. Use the H3 reference diffusion model, MiniMax Qwen3-VL conditioning encoder, and H3 video VAE; the audio VAE is a separate loader. Generated audio is kept, but reference audio is not connected. The 512x320, 124-frame, 24-fps, 8-step defaults are a low-resolution smoke configuration, not a final-quality preset."
+      "content": "Refer to selected images as <Picture 1>, <Picture 2>, etc., and videos as <Video 1>, <Video 2>, etc. Numbering starts at 1 independently for each media kind. Select at least one image or video; unfilled loaders are removed before submission. Output width and height are independent of reference dimensions. Set duration in seconds; the app converts seconds times FPS to the length frame input. H3 aligns the frame count to its native temporal grid, so actual duration can be slightly longer (5s at 24fps becomes 124 frames). Use the H3 reference diffusion model, MiniMax Qwen3-VL conditioning encoder, and H3 video VAE; the audio VAE is separate. Generated audio is kept; reference audio is not connected. The 512x320, 5-second, 24-fps, 8-step defaults are a low-resolution smoke configuration, not a final-quality preset."
     }
   ],
   "nodes": {

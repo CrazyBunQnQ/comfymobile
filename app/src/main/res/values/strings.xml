@@ -331,6 +331,7 @@
     <string name="label_lownoise_lora">Low Noise LoRA</string>
     <string name="label_length">Length</string>
     <string name="label_fps" translatable="false">FPS</string>
+    <string name="label_duration_seconds">Duration (s)</string>
 
     <!-- LoRA chain editor strings -->
     <string name="title_lora_chain">LoRA chain (optional)</string>

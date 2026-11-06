@@ -1,35 +1,32 @@
 package sh.hnet.comfychair.ui.screens
 
 import android.widget.Toast
-
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedIconButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,41 +35,48 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
+import sh.hnet.comfychair.MediaViewerActivity
 import sh.hnet.comfychair.R
 import sh.hnet.comfychair.WorkflowEditorActivity
 import sh.hnet.comfychair.connection.ConnectionManager
 import sh.hnet.comfychair.model.ScreenType
 import sh.hnet.comfychair.queue.JobRegistry
+import sh.hnet.comfychair.repository.AlbumRepository
 import sh.hnet.comfychair.storage.AppSettings
 import sh.hnet.comfychair.ui.components.AppMenuDropdown
+import sh.hnet.comfychair.ui.components.GenerationButton
+import sh.hnet.comfychair.ui.components.VideoPlayer
+import sh.hnet.comfychair.ui.components.VideoScaleMode
 import sh.hnet.comfychair.ui.components.config.ConfigBottomSheetContent
 import sh.hnet.comfychair.ui.components.config.UnifiedCallbacks
+import sh.hnet.comfychair.ui.components.generate.AlbumDropdown
+import sh.hnet.comfychair.ui.components.generate.GenerateWithGalleryRow
 import sh.hnet.comfychair.ui.components.generate.GenerationScreenLayout
 import sh.hnet.comfychair.ui.components.generate.MetaActionsRow
 import sh.hnet.comfychair.ui.components.generate.PromptCardContent
 import sh.hnet.comfychair.ui.components.generate.PreviewPlaceholder
 import sh.hnet.comfychair.ui.components.generate.ProgressPill
+import sh.hnet.comfychair.ui.components.generate.SmallActionIcon
+import sh.hnet.comfychair.ui.components.generate.StatusDot
 import sh.hnet.comfychair.ui.components.generate.WorkflowSplitDropdown
-import sh.hnet.comfychair.ui.components.shared.DimensionStepperRow
+import sh.hnet.comfychair.ui.components.generate.ratioOf
 import sh.hnet.comfychair.ui.components.shared.PromptPresetDropdown
 import sh.hnet.comfychair.ui.components.shared.ResolutionPresetRow
 import sh.hnet.comfychair.ui.components.shared.rememberSpellCheckVisualTransformation
-import sh.hnet.comfychair.ui.components.generate.StatusDot
-import sh.hnet.comfychair.ui.components.generate.ratioOf
+import sh.hnet.comfychair.util.VideoUtils
 import sh.hnet.comfychair.viewmodel.ConnectionStatus
 import sh.hnet.comfychair.viewmodel.GenerationViewModel
 import sh.hnet.comfychair.viewmodel.PromptPresetEvent
@@ -80,20 +84,6 @@ import sh.hnet.comfychair.viewmodel.PromptPresetViewModel
 import sh.hnet.comfychair.viewmodel.ReferenceGenerationEvent
 import sh.hnet.comfychair.viewmodel.ReferenceGenerationViewModel
 import sh.hnet.comfychair.viewmodel.toBottomSheetConfig
-import androidx.compose.foundation.Image
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
-import sh.hnet.comfychair.MediaViewerActivity
-import sh.hnet.comfychair.ui.components.GenerationButton
-import sh.hnet.comfychair.ui.components.VideoPlayer
-import sh.hnet.comfychair.ui.components.VideoScaleMode
-import sh.hnet.comfychair.ui.components.generate.GenerateWithGalleryRow
-import sh.hnet.comfychair.ui.components.generate.AlbumDropdown
-import sh.hnet.comfychair.ui.components.generate.SmallActionIcon
-import sh.hnet.comfychair.repository.AlbumRepository
-import sh.hnet.comfychair.util.VideoUtils
-import androidx.compose.material.icons.filled.Save
-import androidx.compose.material.icons.filled.Share
 
 /**
  * Shared screen for the reference-to-image and reference-to-video modes.
@@ -123,7 +113,12 @@ fun ReferenceGenerationScreen(
     val ownerId = referenceViewModel.ownerId
     val client = generationViewModel.getClient()
     var spellCheckEnabled by remember { mutableStateOf(AppSettings.isPromptSpellCheckEnabled(context)) }
-    var promptExpanded by remember { mutableStateOf(false) }
+    val imeHeight = WindowInsets.ime.getBottom(LocalDensity.current)
+    var previousImeHeight by remember { mutableStateOf(imeHeight) }
+    SideEffect { previousImeHeight = imeHeight }
+    var promptFocused by remember { mutableStateOf(false) }
+    val promptExpanded = promptFocused && imeHeight > 0 && imeHeight >= previousImeHeight
+
     var showOptionsSheet by remember { mutableStateOf(false) }
     val optionsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
@@ -222,7 +217,8 @@ fun ReferenceGenerationScreen(
             onMandatoryLoraChange = referenceViewModel::onMandatoryLoraChange,
             onWidthChange = referenceViewModel::onWidthChange,
             onHeightChange = referenceViewModel::onHeightChange,
-            onLengthChange = referenceViewModel::onLengthChange,
+            onLengthChange = referenceViewModel::onDurationChange,
+
             onFpsChange = referenceViewModel::onFpsChange,
             onStepsChange = referenceViewModel::onStepsChange,
             onCfgChange = referenceViewModel::onCfgChange,
@@ -253,17 +249,15 @@ fun ReferenceGenerationScreen(
                     referenceViewModel.setWidthAndHeight(width.toString(), height.toString())
                 }
             )
-            DimensionStepperRow(
-                workflowName = uiState.selectedWorkflow,
-                width = uiState.width,
-                onWidthChange = referenceViewModel::onWidthChange,
-                widthError = uiState.widthError,
-                height = uiState.height,
-                onHeightChange = referenceViewModel::onHeightChange,
-                heightError = uiState.heightError
-            )
+            if (isVideoMode && uiState.capabilities.hasLength) {
+                DurationPresetRow(
+                    durationSeconds = uiState.durationSeconds,
+                    onSelect = referenceViewModel::onDurationChange
+                )
+            }
         }
     }
+
 
     GenerationScreenLayout(
         expandPrompt = promptExpanded,
@@ -320,8 +314,8 @@ fun ReferenceGenerationScreen(
                 append(uiState.height)
                 if (isVideoMode && uiState.capabilities.hasLength) {
                     append(" · ")
-                    append(uiState.length)
-                    append('f')
+                    append(uiState.durationSeconds)
+                    append('s')
                 }
                 if (isVideoMode && uiState.capabilities.hasFrameRate) {
                     append(" · ")
@@ -347,7 +341,7 @@ fun ReferenceGenerationScreen(
                     presetViewModel.clearActivePreset()
                 },
                 fill = fill,
-                onFocusChanged = { promptExpanded = it },
+                onFocusChanged = { promptFocused = it },
                 autoCorrect = spellCheckEnabled,
                 visualTransformation = visualTransformation,
                 presetButton = {
@@ -416,7 +410,6 @@ fun ReferenceGenerationScreen(
             onDismiss = presetViewModel::dismissLibrary
         )
     }
-
     if (presetUiState.showSaveDialog) {
         sh.hnet.comfychair.ui.components.PromptPresetDialog(
             editingPreset = presetUiState.editingPreset,
@@ -426,5 +419,23 @@ fun ReferenceGenerationScreen(
             onDismiss = presetViewModel::dismissSaveDialog,
             onSave = presetViewModel::onSavePreset
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DurationPresetRow(durationSeconds: String, onSelect: (String) -> Unit) {
+    val selectedSeconds = durationSeconds.toIntOrNull()
+    val presets = listOf(5, 10, 15)
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        presets.forEachIndexed { index, seconds ->
+            SegmentedButton(
+                selected = selectedSeconds == seconds,
+                onClick = { onSelect(seconds.toString()) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = presets.size)
+            ) {
+                Text("${seconds}s")
+            }
+        }
     }
 }
