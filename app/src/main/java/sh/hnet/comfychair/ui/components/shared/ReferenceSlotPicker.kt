@@ -1,12 +1,8 @@
 package sh.hnet.comfychair.ui.components.shared
 
-import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import android.media.MediaMetadataRetriever
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -33,44 +29,65 @@ import sh.hnet.comfychair.workflow.ReferenceMediaKind
 
 @Composable
 fun ReferenceSlotsSection(config: ReferenceConfig) {
-    ReferenceSlotPicker(ReferenceMediaKind.IMAGE, config.images, config.imageCapacity, config)
-    if (config.allowVideos) ReferenceSlotPicker(ReferenceMediaKind.VIDEO, config.videos, config.videoCapacity, config)
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (config.allowVideos && config.onAddMixed != null) {
+            Text(stringResource(R.string.reference_media), style = MaterialTheme.typography.titleSmall)
+            ReferenceMediaPickerButton(
+                allowVideos = true,
+                imageCapacity = (config.imageCapacity - config.images.size).coerceAtLeast(0),
+                videoCapacity = (config.videoCapacity - config.videos.size).coerceAtLeast(0),
+                enabled = config.enabled,
+                onSelected = config.onAddMixed
+            ) { onClick, enabled ->
+                OutlinedButton(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Text(stringResource(R.string.reference_picker_add_media))
+                }
+            }
+        }
+        ReferenceSlotPicker(ReferenceMediaKind.IMAGE, config.images, config.imageCapacity, config)
+        if (config.allowVideos) ReferenceSlotPicker(ReferenceMediaKind.VIDEO, config.videos, config.videoCapacity, config)
+    }
 }
 
 @Composable
 private fun ReferenceSlotPicker(kind: ReferenceMediaKind, selections: List<ReferenceMediaSelection>, capacity: Int, config: ReferenceConfig) {
-    val context = LocalContext.current
-    val mime = if (kind == ReferenceMediaKind.IMAGE) "image/*" else "video/*"
     val title = stringResource(if (kind == ReferenceMediaKind.IMAGE) R.string.reference_images else R.string.reference_videos)
-    var replaceIndex by remember { mutableIntStateOf(-1) }
-    fun retain(uri: Uri) { runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
-    val add = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        uris.forEach(::retain)
-        if (uris.isNotEmpty()) config.onAdd(kind, uris)
-    }
-    val replace = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null && replaceIndex >= 0) { retain(uri); config.onReplace(kind, replaceIndex, uri) }
-    }
     Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("$title (${selections.size}/$capacity)", style = MaterialTheme.typography.titleSmall)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             itemsIndexed(selections, key = { index, item -> "$index:${item.uri}" }) { index, item ->
                 val label = stringResource(if (kind == ReferenceMediaKind.IMAGE) R.string.reference_image_slot else R.string.reference_video_slot, index + 1)
                 Card(Modifier.width(132.dp)) {
-                    Box(Modifier.size(132.dp).clickable(enabled = config.enabled) { replaceIndex = index; replace.launch(arrayOf(mime)) }) {
-                        ReferenceThumbnail(item, kind, label)
-                        IconButton(onClick = { config.onRemove(kind, index) }, enabled = config.enabled) {
-                            Icon(Icons.Default.Close, stringResource(R.string.button_delete))
+                    ReferenceMediaPickerButton(
+                        allowVideos = kind == ReferenceMediaKind.VIDEO,
+                        imageCapacity = if (kind == ReferenceMediaKind.IMAGE) 1 else 0,
+                        videoCapacity = if (kind == ReferenceMediaKind.VIDEO) 1 else 0,
+                        enabled = config.enabled,
+                        onSelected = { uris -> uris.firstOrNull()?.let { config.onReplace(kind, index, it) } }
+                    ) { onClick, enabled ->
+                        Box(Modifier.size(132.dp).clickable(enabled = enabled, onClick = onClick)) {
+                            ReferenceThumbnail(item, kind, label)
+                            IconButton(onClick = { config.onRemove(kind, index) }, enabled = config.enabled) {
+                                Icon(Icons.Default.Close, stringResource(R.string.button_delete))
+                            }
                         }
                     }
                     Text(label, Modifier.padding(horizontal = 6.dp), style = MaterialTheme.typography.labelMedium)
                     Text(item.displayName, Modifier.padding(6.dp), maxLines = 2, style = MaterialTheme.typography.bodySmall)
                 }
             }
-            item {
-                OutlinedButton(onClick = { add.launch(arrayOf(mime)) }, enabled = config.enabled && selections.size < capacity,
-                    modifier = Modifier.size(132.dp)) {
-                    Icon(Icons.Default.Add, stringResource(R.string.reference_add))
+            if (kind == ReferenceMediaKind.IMAGE || !config.allowVideos || config.onAddMixed == null) item {
+                ReferenceMediaPickerButton(
+                    allowVideos = false,
+                    imageCapacity = (capacity - selections.size).coerceAtLeast(0),
+                    videoCapacity = 0,
+                    enabled = config.enabled,
+                    onSelected = { config.onAdd(kind, it) }
+                ) { onClick, enabled ->
+                    OutlinedButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(132.dp)) {
+                        Icon(Icons.Default.Add, stringResource(R.string.reference_add))
+                    }
                 }
             }
         }

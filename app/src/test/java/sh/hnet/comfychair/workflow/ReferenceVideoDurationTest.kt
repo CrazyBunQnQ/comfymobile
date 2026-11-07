@@ -31,6 +31,14 @@ class ReferenceVideoDurationTest {
         assertEquals(5, WorkflowDefaults.fromJson(WorkflowDefaults.toJson(defaults)).durationSeconds)
     }
 
+    @Test fun originalRatioPreferenceRoundTripsAndLegacyValuesDefaultUnspecified() {
+        val legacy = WorkflowValues.fromJson("""{"width":512,"height":320}""")
+        assertEquals(null, legacy.useOriginalRatio)
+        val restored = WorkflowValues.fromJson(WorkflowValues.toJson(legacy.copy(useOriginalRatio = false, megapixels = 0.4f, referenceAspectRatio = "2:3")))
+        assertEquals(false, restored.useOriginalRatio)
+        assertEquals("2:3", restored.referenceAspectRatio)
+        assertEquals(0.4f, restored.megapixels!!, 0.0001f)
+    }
     @Test fun videoPreparationConvertsSecondsAndKeepsNumericFrameInput() {
         val template = JSONObject("""{"nodes":{
           "1":{"class_type":"LoadVideo","inputs":{"file":"{{reference_video_1}}"}},

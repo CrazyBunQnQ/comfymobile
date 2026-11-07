@@ -62,8 +62,10 @@ data class WorkflowValues(
     val stopAtClipLayer: Int? = null,
     val referenceImageUris: List<String> = emptyList(),
     val referenceVideoUris: List<String> = emptyList(),
-    val durationSeconds: Int? = null
-) {
+    val durationSeconds: Int? = null,
+    val useOriginalRatio: Boolean? = null,
+    val referenceAspectRatio: String? = null
+){
     companion object {
         fun fromJson(jsonString: String): WorkflowValues {
             val json = JSONObject(jsonString)
@@ -79,6 +81,8 @@ data class WorkflowValues(
                 length = json.optInt("length").takeIf { it > 0 },
                 frameRate = json.optInt("frameRate").takeIf { it > 0 },
                 durationSeconds = json.optInt("duration_seconds").takeIf { it > 0 },
+                useOriginalRatio = if (json.has("useOriginalRatio")) json.optBoolean("useOriginalRatio") else null,
+                referenceAspectRatio = json.optString("referenceAspectRatio").takeIf { it in setOf("2:3", "1:1", "3:2") },
                 model = json.optString("model").takeIf { it.isNotEmpty() },
                 unetModel = json.optString("unetModel").takeIf { it.isNotEmpty() },
                 loraModel = json.optString("loraModel").takeIf { it.isNotEmpty() },
@@ -155,6 +159,8 @@ data class WorkflowValues(
                 values.stopAtClipLayer?.let { put("stopAtClipLayer", it) }
                 put("reference_image_uris", JSONArray(values.referenceImageUris))
                 put("reference_video_uris", JSONArray(values.referenceVideoUris))
+                values.useOriginalRatio?.let { put("useOriginalRatio", it) }
+                values.referenceAspectRatio?.let { put("referenceAspectRatio", it) }
             }.toString()
         }
     }

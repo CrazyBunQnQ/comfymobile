@@ -1,6 +1,9 @@
 package sh.hnet.comfychair.viewmodel
 
 import android.content.Context
+import android.graphics.BitmapFactory
+import android.media.ExifInterface
+import android.media.MediaMetadataRetriever
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -11,6 +14,7 @@ import sh.hnet.comfychair.model.LoraSelection
 import sh.hnet.comfychair.model.ReferenceMediaSelection
 import sh.hnet.comfychair.model.WorkflowCapabilities
 import sh.hnet.comfychair.model.WorkflowValues
+import sh.hnet.comfychair.model.WorkflowDefaults
 import sh.hnet.comfychair.storage.AppSettings
 import sh.hnet.comfychair.ui.components.config.BottomSheetConfig
 import sh.hnet.comfychair.ui.components.config.CommonGenerationState
@@ -46,6 +50,7 @@ import sh.hnet.comfychair.workflow.ReferenceMediaKind
 import sh.hnet.comfychair.workflow.ReferenceWorkflowSupport
 import sh.hnet.comfychair.workflow.ReferenceVideoDuration
 import sh.hnet.comfychair.workflow.WorkflowConstraintsProvider
+import sh.hnet.comfychair.workflow.ReferenceResolution
 
 /** Workflow option for the shared reference generation screen. */
 data class ReferenceWorkflowItem(
@@ -83,6 +88,10 @@ data class ReferenceGenerationUiState(
     val width: String = "1024",
     val height: String = "1024",
     val durationSeconds: String = "5",
+    val useOriginalRatio: Boolean = true,
+    val referenceAspectRatio: String? = null,
+    val megapixels: String = "1.0",
+    val megapixelsError: String? = null,
     val fps: String = "24",
     override val steps: String = "20",
     override val cfg: String = "7.0",
@@ -121,10 +130,12 @@ data class ReferenceGenerationUiState(
 
     val referenceImages: List<ReferenceMediaSelection> = emptyList(),
     val referenceVideos: List<ReferenceMediaSelection> = emptyList(),
+    val sourceMedia: ReferenceMediaSelection? = null,
     val isUploading: Boolean = false,
     val isFetching: Boolean = false,
     val imageCapacity: Int = 0,
     val videoCapacity: Int = 0,
+    val sourceDimensionsError: String? = null,
     val invalidReferenceUris: Set<String> = emptySet(),
     val previewBitmap: Bitmap? = null,
     val currentVideoUri: Uri? = null,
@@ -172,6 +183,7 @@ sealed class ReferenceGenerationEvent {
 class ReferenceGenerationViewModel(val type: WorkflowType) :
     BaseGenerationViewModel<ReferenceGenerationUiState, ReferenceGenerationEvent>() {
     override val initialState = ReferenceGenerationUiState()
+    private var metadataGeneration = 0L
 
     init {
         require(type == WorkflowType.REF2I || type == WorkflowType.REF2V) {
@@ -228,9 +240,13 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
         val cache = ConnectionManager.modelCache.value
 
         fun choose(savedValue: String?, current: String, available: List<String>) =
-            savedValue?.takeIf { it in available }
+            savedValue?.takeIf(String::isNotEmpty)
+                ?: current.takeIf(String::isNotEmpty)
                 ?: validateModelSelection(current, available)
 
+        val referenceImages = saved?.referenceImageUris.orEmpty().map { restoreMedia(it) }
+        val referenceVideos = saved?.referenceVideoUris.orEmpty().map { restoreMedia(it) }
+        val megapixels = restoredMegapixels(saved, defaults, workflow.name)
         val state = _uiState.value
         val savedModel = saved?.model
         val fps = saved?.frameRate ?: defaults?.frameRate ?: 24
@@ -245,13 +261,18 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
             capabilities = capabilities,
             imageCapacity = referenceCapacity(workflow.id, ReferenceMediaKind.IMAGE),
             videoCapacity = referenceCapacity(workflow.id, ReferenceMediaKind.VIDEO),
-            referenceImages = saved?.referenceImageUris.orEmpty().map { restoreMedia(it) },
-            referenceVideos = saved?.referenceVideoUris.orEmpty().map { restoreMedia(it) },
+            referenceImages = referenceImages,
+            referenceVideos = referenceVideos,
+            sourceMedia = preferredSource(referenceImages, referenceVideos),
+            sourceDimensionsError = null,
             invalidReferenceUris = (saved?.referenceImageUris.orEmpty() + saved?.referenceVideoUris.orEmpty()).filterNot { readable(Uri.parse(it)) }.toSet(),
             negativePrompt = saved?.negativePrompt ?: defaults?.negativePrompt.orEmpty(),
             width = saved?.width?.toString() ?: defaults?.width?.toString() ?: defaultWidth(),
             height = saved?.height?.toString() ?: defaults?.height?.toString() ?: defaultHeight(),
-            durationSeconds = duration.toString(),
+            useOriginalRatio = saved?.useOriginalRatio ?: true,
+            referenceAspectRatio = saved?.referenceAspectRatio,
+            megapixels = megapixels,
+            megapixelsError = validateMegapixels(megapixels, workflow.name),
             fps = fps.toString(),
             steps = saved?.steps?.toString() ?: defaults?.steps?.toString() ?: "20",
             cfg = saved?.cfg?.toString() ?: defaults?.cfg?.toString() ?: "7.0",
@@ -303,27 +324,27 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
             durationError = if (capabilities.hasLength) validateDuration(duration.toString(), fps.toString(), workflow.name) else null,
             fpsError = if (capabilities.hasFrameRate) validateNumber("frame_rate", fps.toString(), workflow.name) else null
         )
+        metadataGeneration++
+        recalculateOriginalCanvas()
     }
 
     private fun updateModels(cache: sh.hnet.comfychair.connection.ModelCache) {
+        if (cache.unets.isEmpty() && cache.checkpoints.isEmpty() && cache.clips.isEmpty() && cache.vaes.isEmpty()) return
         _uiState.update { state ->
-            val checkpoints = state.deferredCheckpoint?.takeIf { it in cache.checkpoints }
-                ?: validateModelSelection(state.selectedCheckpoint, cache.checkpoints)
-            val unets = state.deferredUnet?.takeIf { it in cache.unets }
-                ?: validateModelSelection(state.selectedUnet, cache.unets)
-            val vaes = state.deferredVae?.takeIf { it in cache.vaes }
-                ?: validateModelSelection(state.selectedVae, cache.vaes)
-            val clips = validateModelSelection(state.selectedClip, cache.clips)
-            val clip1 = state.deferredClip1?.takeIf { it in cache.clips } ?: validateModelSelection(state.selectedClip1, cache.clips)
-            val clip2 = state.deferredClip2?.takeIf { it in cache.clips } ?: validateModelSelection(state.selectedClip2, cache.clips)
-            val clip3 = state.deferredClip3?.takeIf { it in cache.clips } ?: validateModelSelection(state.selectedClip3, cache.clips)
-            val clip4 = state.deferredClip4?.takeIf { it in cache.clips } ?: validateModelSelection(state.selectedClip4, cache.clips)
-            val textEncoder = state.deferredTextEncoder?.takeIf { it in cache.textEncoders }
-                ?: validateModelSelection(state.selectedTextEncoder, cache.textEncoders)
-            val latentModel = state.deferredLatentUpscaleModel?.takeIf { it in cache.latentUpscaleModels }
-                ?: validateModelSelection(state.selectedLatentUpscaleModel, cache.latentUpscaleModels)
-            val lora = state.deferredLoraName?.takeIf { it in cache.loras }
-                ?: validateModelSelection(state.selectedLoraName, cache.loras)
+            fun selected(deferred: String?, current: String, available: List<String>) =
+                deferred?.takeIf(String::isNotEmpty) ?: current.takeIf(String::isNotEmpty)
+                    ?: validateModelSelection(current, available)
+            val checkpoints = selected(state.deferredCheckpoint, state.selectedCheckpoint, cache.checkpoints)
+            val unets = selected(state.deferredUnet, state.selectedUnet, cache.unets)
+            val vaes = selected(state.deferredVae, state.selectedVae, cache.vaes)
+            val clips = selected(state.deferredClip, state.selectedClip, cache.clips)
+            val clip1 = selected(state.deferredClip1, state.selectedClip1, cache.clips)
+            val clip2 = selected(state.deferredClip2, state.selectedClip2, cache.clips)
+            val clip3 = selected(state.deferredClip3, state.selectedClip3, cache.clips)
+            val clip4 = selected(state.deferredClip4, state.selectedClip4, cache.clips)
+            val textEncoder = selected(state.deferredTextEncoder, state.selectedTextEncoder, cache.textEncoders)
+            val latentModel = selected(state.deferredLatentUpscaleModel, state.selectedLatentUpscaleModel, cache.latentUpscaleModels)
+            val lora = selected(state.deferredLoraName, state.selectedLoraName, cache.loras)
             state.copy(
                 availableCheckpoints = cache.checkpoints,
                 availableUnets = cache.unets,
@@ -388,22 +409,25 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
                 width = state.width.toIntOrNull(),
                 height = state.height.toIntOrNull(),
                 durationSeconds = if (isVideoMode) state.durationSeconds.toIntOrNull() else null,
+                megapixels = state.megapixels.toFloatOrNull(),
+                useOriginalRatio = state.useOriginalRatio,
+                referenceAspectRatio = state.referenceAspectRatio,
                 frameRate = state.fps.toIntOrNull(),
                 steps = state.steps.toIntOrNull(),
                 cfg = state.cfg.toFloatOrNull(),
                 samplerName = state.sampler,
                 scheduler = state.scheduler,
                 negativePrompt = state.negativePrompt.takeIf(String::isNotEmpty),
-                model = state.selectedCheckpoint.takeIf(String::isNotEmpty) ?: state.selectedUnet.takeIf(String::isNotEmpty),
-                unetModel = state.selectedUnet.takeIf(String::isNotEmpty),
-                vaeModel = state.selectedVae.takeIf(String::isNotEmpty),
-                clipModel = state.selectedClip.takeIf(String::isNotEmpty),
-                clip1Model = state.selectedClip1.takeIf(String::isNotEmpty),
-                clip2Model = state.selectedClip2.takeIf(String::isNotEmpty),
-                clip3Model = state.selectedClip3.takeIf(String::isNotEmpty),
-                clip4Model = state.selectedClip4.takeIf(String::isNotEmpty),
-                textEncoderModel = state.selectedTextEncoder.takeIf(String::isNotEmpty),
-                latentUpscaleModel = state.selectedLatentUpscaleModel.takeIf(String::isNotEmpty),
+                model = state.selectedCheckpoint.takeIf(String::isNotEmpty) ?: state.selectedUnet.takeIf(String::isNotEmpty) ?: old?.model,
+                unetModel = state.selectedUnet.takeIf(String::isNotEmpty) ?: old?.unetModel,
+                vaeModel = state.selectedVae.takeIf(String::isNotEmpty) ?: old?.vaeModel,
+                clipModel = state.selectedClip.takeIf(String::isNotEmpty) ?: old?.clipModel,
+                clip1Model = state.selectedClip1.takeIf(String::isNotEmpty) ?: old?.clip1Model,
+                clip2Model = state.selectedClip2.takeIf(String::isNotEmpty) ?: old?.clip2Model,
+                clip3Model = state.selectedClip3.takeIf(String::isNotEmpty) ?: old?.clip3Model,
+                clip4Model = state.selectedClip4.takeIf(String::isNotEmpty) ?: old?.clip4Model,
+                textEncoderModel = state.selectedTextEncoder.takeIf(String::isNotEmpty) ?: old?.textEncoderModel,
+                latentUpscaleModel = state.selectedLatentUpscaleModel.takeIf(String::isNotEmpty) ?: old?.latentUpscaleModel,
                 loraModel = state.selectedLoraName.takeIf(String::isNotEmpty),
                 loraChain = LoraSelection.toJsonString(state.loraChain).takeIf { state.loraChain.isNotEmpty() },
                 seed = state.seed.toLongOrNull(),
@@ -435,6 +459,7 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
         val state = _uiState.value
         val workflow = state.availableWorkflows.firstOrNull { it.name == name } ?: return
         state.selectedWorkflowId.takeIf(String::isNotEmpty)?.let(::saveWorkflowValues)
+        metadataGeneration++
         loadWorkflowValues(workflow)
         saveConfiguration()
     }
@@ -453,8 +478,32 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
         if (isVideoMode) SeasonalPrompts.getTextToVideoPrompt() else SeasonalPrompts.getTextToImagePrompt()
     )
 
-    fun onWidthChange(value: String) = update { it.copy(width = value, widthError = validateNumber("width", value)) }
-    fun onHeightChange(value: String) = update { it.copy(height = value, heightError = validateNumber("height", value)) }
+    fun onWidthChange(value: String) = onDimensionChange(value, editingWidth = true)
+    fun onHeightChange(value: String) = onDimensionChange(value, editingWidth = false)
+
+    private fun onDimensionChange(value: String, editingWidth: Boolean) {
+        metadataGeneration++
+        update { state ->
+            val key = if (editingWidth) "width" else "height"
+            val otherKey = if (editingWidth) "height" else "width"
+            val error = validateNumber(key, value)
+            val complement = if (error == null && state.megapixelsError == null) {
+                ReferenceResolution.complementaryDimension(
+                    value.toInt(), state.megapixels.toFloat(),
+                    WorkflowConstraintsProvider.getConstraints(otherKey, state.selectedWorkflow)
+                )?.toString()
+            } else null
+            state.copy(
+                width = if (editingWidth) value else complement ?: state.width,
+                height = if (!editingWidth) value else complement ?: state.height,
+                widthError = if (editingWidth) error else if (complement != null) validateNumber("width", complement) else state.widthError,
+                heightError = if (!editingWidth) error else if (complement != null) validateNumber("height", complement) else state.heightError,
+                useOriginalRatio = false,
+                referenceAspectRatio = null,
+                sourceDimensionsError = null
+            )
+        }
+    }
     fun onDurationChange(value: String) = update {
         it.copy(durationSeconds = value, durationError = validateDuration(value, it.fps))
     }
@@ -515,18 +564,60 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
         return ReferenceMediaSelection(uri, name, mime)
     }
 
+    private fun preferredSource(
+        images: List<ReferenceMediaSelection>,
+        videos: List<ReferenceMediaSelection>
+    ): ReferenceMediaSelection? = if (isVideoMode) videos.firstOrNull() ?: images.firstOrNull() else images.firstOrNull()
+
     fun addReferences(kind: ReferenceMediaKind, uris: List<Uri>) {
-        if (_uiState.value.isUploading || (kind == ReferenceMediaKind.VIDEO && !isVideoMode)) return
+        val filtered = uris.filter { uri ->
+            val mime = runCatching { applicationContext?.contentResolver?.getType(uri) }.getOrNull().orEmpty()
+            mime.startsWith(if (kind == ReferenceMediaKind.IMAGE) "image/" else "video/")
+        }
+        if (kind == ReferenceMediaKind.VIDEO && !isVideoMode) return
+        addMixedReferences(filtered)
+    }
+
+    fun addMixedReferences(uris: List<Uri>) {
+        val ordered = uris.map(::media)
         val state = _uiState.value
-        val current = if (kind == ReferenceMediaKind.IMAGE) state.referenceImages else state.referenceVideos
-        val capacity = if (kind == ReferenceMediaKind.IMAGE) state.imageCapacity else state.videoCapacity
-        val accepted = uris.map(::media).filter { it.mimeType.startsWith(if (kind == ReferenceMediaKind.IMAGE) "image/" else "video/") }
-            .take((capacity - current.size).coerceAtLeast(0))
-        setReferences(kind, current + accepted)
-        if (accepted.size < uris.size) viewModelScope.launch {
-            _events.emit(ReferenceGenerationEvent.ShowToastMessage(applicationContext!!.getString(R.string.reference_not_added, uris.size - accepted.size)))
+        if (state.isUploading) return
+        val accepted = ordered.filter { it.mimeType.startsWith("image/") || isVideoMode && it.mimeType.startsWith("video/") }
+        val images = accepted.filter { it.mimeType.startsWith("image/") }
+            .take((state.imageCapacity - state.referenceImages.size).coerceAtLeast(0))
+        val videos = accepted.filter { it.mimeType.startsWith("video/") }
+            .take((state.videoCapacity - state.referenceVideos.size).coerceAtLeast(0))
+        if (images.isEmpty() && videos.isEmpty()) {
+            if (uris.isNotEmpty()) showNotAdded(uris.size)
+            return
+        }
+        _uiState.update { current ->
+            val nextImages = current.referenceImages + images
+            val nextVideos = current.referenceVideos + videos
+            current.copy(
+                referenceImages = nextImages,
+                referenceVideos = nextVideos,
+                sourceMedia = preferredSource(nextImages, nextVideos),
+                sourceDimensionsError = null,
+                invalidReferenceUris = (nextImages + nextVideos).filterNot { readable(it.uri) }.map { it.uri.toString() }.toSet()
+            )
+        }
+        metadataGeneration++
+        recalculateOriginalCanvas()
+        saveConfiguration()
+        val rejected = uris.size - images.size - videos.size
+        if (rejected > 0) showNotAdded(rejected)
+    }
+
+
+    private fun showNotAdded(count: Int) {
+        viewModelScope.launch {
+            applicationContext?.let { context ->
+                _events.emit(ReferenceGenerationEvent.ShowToastMessage(context.getString(R.string.reference_not_added, count)))
+            }
         }
     }
+
 
     fun replaceReference(kind: ReferenceMediaKind, index: Int, uri: Uri) {
         if (_uiState.value.isUploading) return
@@ -544,12 +635,128 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
 
     private fun setReferences(kind: ReferenceMediaKind, list: List<ReferenceMediaSelection>) {
         _uiState.update { state ->
-            val next = if (kind == ReferenceMediaKind.IMAGE) state.copy(referenceImages = list) else state.copy(referenceVideos = list)
-            next.copy(invalidReferenceUris = (next.referenceImages + next.referenceVideos).filterNot { readable(it.uri) }.map { it.uri.toString() }.toSet())
+            val images = if (kind == ReferenceMediaKind.IMAGE) list else state.referenceImages
+            val videos = if (kind == ReferenceMediaKind.VIDEO) list else state.referenceVideos
+            val next = state.copy(
+                referenceImages = images,
+                referenceVideos = videos,
+                sourceMedia = preferredSource(images, videos),
+                sourceDimensionsError = null
+            )
+            next.copy(invalidReferenceUris = (images + videos).filterNot { readable(it.uri) }.map { it.uri.toString() }.toSet())
+        }
+        metadataGeneration++
+        recalculateOriginalCanvas()
+        saveConfiguration()
+    }
+
+    private fun validateMegapixels(value: String, workflow: String = _uiState.value.selectedWorkflow): String? {
+        val number = value.toFloatOrNull() ?: return applicationContext?.getString(R.string.error_invalid_number) ?: "Invalid number"
+        val constraints = WorkflowConstraintsProvider.getConstraints("megapixels", workflow)
+        return if (!number.isFinite() || number < constraints.min || number > constraints.max)
+            applicationContext?.getString(R.string.error_invalid_number) ?: "Invalid number" else null
+    }
+    private fun restoredMegapixels(saved: WorkflowValues?, defaults: WorkflowDefaults?, workflow: String): String {
+        saved?.megapixels?.let { return it.toString() }
+        val value = defaults?.megapixels ?: 1f
+        val constraints = WorkflowConstraintsProvider.getConstraints("megapixels", workflow)
+        return if (value.isFinite()) value.coerceIn(constraints.min, constraints.max).toString() else "1.0"
+    }
+
+    private fun recalculateOriginalCanvas() {
+        val state = _uiState.value
+        val source = state.sourceMedia ?: return
+        if (source.width <= 0 || source.height <= 0) {
+            loadSourceDimensions(source)
+            return
+        }
+        if (!state.useOriginalRatio || state.megapixelsError != null) return
+        val dimensions = calculateCanvas(source.width, source.height, state.megapixels, state.selectedWorkflow) ?: return
+        _uiState.update { current ->
+            if (!current.useOriginalRatio || current.selectedWorkflowId != state.selectedWorkflowId ||
+                current.sourceMedia?.uri != source.uri || current.megapixels != state.megapixels) current
+            else current.copy(
+                width = dimensions.width.toString(),
+                height = dimensions.height.toString(),
+                widthError = validateNumber("width", dimensions.width.toString(), state.selectedWorkflow),
+                heightError = validateNumber("height", dimensions.height.toString(), state.selectedWorkflow),
+                sourceDimensionsError = null
+            )
         }
         saveConfiguration()
     }
 
+    private fun calculateCanvas(width: Int, height: Int, megapixels: String, workflow: String): ReferenceResolution.Dimensions? {
+        val mp = megapixels.toFloatOrNull() ?: return null
+        return ReferenceResolution.calculateCanvas(
+            width, height, mp,
+            WorkflowConstraintsProvider.getConstraints("width", workflow),
+            WorkflowConstraintsProvider.getConstraints("height", workflow)
+        )
+    }
+    private fun loadSourceDimensions(source: ReferenceMediaSelection) {
+        val workflowId = _uiState.value.selectedWorkflowId
+        val generation = ++metadataGeneration
+        viewModelScope.launch {
+            val dimensions = withContext(Dispatchers.IO) { readMediaDimensions(source) }
+            if (generation != metadataGeneration) return@launch
+            val current = _uiState.value
+            if (current.selectedWorkflowId != workflowId || current.sourceMedia?.uri != source.uri) return@launch
+            if (dimensions == null) {
+                _uiState.update { state ->
+                    if (state.selectedWorkflowId == workflowId && state.sourceMedia?.uri == source.uri) {
+                        state.copy(sourceDimensionsError = "Unable to read reference dimensions; keeping current canvas size")
+                    } else state
+                }
+                return@launch
+            }
+            _uiState.update { state -> state.copy(sourceDimensionsError = null) }
+            val updated = when {
+                current.referenceVideos.any { it.uri == source.uri } -> current.referenceVideos.map { if (it.uri == source.uri) it.copy(width = dimensions.width, height = dimensions.height) else it }
+                else -> current.referenceImages.map { if (it.uri == source.uri) it.copy(width = dimensions.width, height = dimensions.height) else it }
+            }
+            _uiState.update { state ->
+                if (state.selectedWorkflowId != workflowId || state.sourceMedia?.uri != source.uri) state
+                else {
+                    val images = if (state.referenceImages.any { it.uri == source.uri }) updated else state.referenceImages
+                    val videos = if (state.referenceVideos.any { it.uri == source.uri }) updated else state.referenceVideos
+                    state.copy(referenceImages = images, referenceVideos = videos, sourceMedia = preferredSource(images, videos))
+                }
+            }
+            recalculateOriginalCanvas()
+            saveConfiguration()
+        }
+    }
+
+    private fun readMediaDimensions(media: ReferenceMediaSelection): ReferenceResolution.Dimensions? = runCatching {
+        val context = applicationContext ?: return null
+        if (media.mimeType.startsWith("video/")) {
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(context, media.uri)
+                val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+                val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+                val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                ReferenceResolution.orientedDimensions(width, height, rotation)
+            } finally {
+                retriever.release()
+            }
+        } else {
+            val resolver = context.contentResolver
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            resolver.openInputStream(media.uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+            val orientation = resolver.openInputStream(media.uri)?.use { input ->
+                ExifInterface(input).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+            } ?: ExifInterface.ORIENTATION_NORMAL
+            val rotation = when (orientation) {
+                ExifInterface.ORIENTATION_ROTATE_90, ExifInterface.ORIENTATION_TRANSPOSE -> 90
+                ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                ExifInterface.ORIENTATION_ROTATE_270, ExifInterface.ORIENTATION_TRANSVERSE -> 270
+                else -> 0
+            }
+            ReferenceResolution.orientedDimensions(bounds.outWidth, bounds.outHeight, rotation)
+        }
+    }.getOrNull()
     private fun validateNumber(key: String, value: String, workflow: String = _uiState.value.selectedWorkflow): String? {
         val number = value.toIntOrNull() ?: return applicationContext?.getString(R.string.error_invalid_integer) ?: "Invalid integer"
         val constraints = WorkflowConstraintsProvider.getConstraints(key, workflow)
@@ -566,11 +773,47 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
             applicationContext?.getString(R.string.error_invalid_number) ?: "Invalid number" else null
     }
 
+    fun onOriginalRatioSelect() {
+        metadataGeneration++
+        _uiState.update { it.copy(useOriginalRatio = true, referenceAspectRatio = null) }
+        recalculateOriginalCanvas()
+        saveConfiguration()
+    }
+
+    fun onMegapixelsChange(value: String) {
+        val error = validateMegapixels(value)
+        metadataGeneration++
+        _uiState.update { it.copy(megapixels = value, megapixelsError = error) }
+        if (error == null) {
+            val ratio = _uiState.value.referenceAspectRatio
+            if (_uiState.value.useOriginalRatio) recalculateOriginalCanvas()
+            else if (ratio != null) onResolutionPresetSelect(ratio)
+            else onWidthChange(_uiState.value.width)
+        }
+        saveConfiguration()
+    }
+    fun onResolutionPresetSelect(ratio: String) {
+        val (width, height) = when (ratio) {
+            "2:3" -> 2 to 3
+            "1:1" -> 1 to 1
+            "3:2" -> 3 to 2
+            else -> return
+        }
+        val state = _uiState.value
+        val size = calculateCanvas(width, height, state.megapixels, state.selectedWorkflow) ?: return
+        setWidthAndHeight(size.width.toString(), size.height.toString())
+        update { it.copy(referenceAspectRatio = ratio) }
+    }
+
     fun setWidthAndHeight(width: String, height: String) {
-        _uiState.update {
-            it.copy(
+        metadataGeneration++
+        _uiState.update { state ->
+            state.copy(
                 width = width,
                 height = height,
+                useOriginalRatio = false,
+                referenceAspectRatio = null,
+                sourceDimensionsError = null,
                 widthError = validateNumber("width", width),
                 heightError = validateNumber("height", height)
             )
@@ -585,7 +828,10 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
 
     override fun hasValidConfiguration(): Boolean {
         val state = _uiState.value
-        return !state.isUploading && state.invalidReferenceUris.isEmpty() &&
+        return !state.isUploading &&
+            !(state.useOriginalRatio && state.sourceMedia?.let { it.width <= 0 || it.height <= 0 } == true) &&
+            !(state.useOriginalRatio && state.sourceMedia != null && state.sourceDimensionsError != null) &&
+            (!state.useOriginalRatio || state.megapixelsError == null) && state.invalidReferenceUris.isEmpty() &&
             (state.referenceImages.isNotEmpty() || (isVideoMode && state.referenceVideos.isNotEmpty())) &&
             state.positivePrompt.isNotBlank() && state.selectedWorkflowId.isNotEmpty() &&
             state.widthError == null && state.heightError == null && state.durationError == null &&
@@ -596,7 +842,7 @@ class ReferenceGenerationViewModel(val type: WorkflowType) :
 
     fun referenceConfig(): ReferenceConfig = _uiState.value.let { state ->
         ReferenceConfig(state.referenceImages, state.referenceVideos, state.imageCapacity, state.videoCapacity,
-            isVideoMode, !state.isUploading, ::addReferences, ::replaceReference, ::removeReference)
+            isVideoMode, !state.isUploading, ::addReferences, ::replaceReference, ::removeReference, ::addMixedReferences)
     }
 
     private data class UploadResult(val filename: String?, val error: String?, val failure: ConnectionFailure)
@@ -881,6 +1127,12 @@ fun ReferenceGenerationUiState.toBottomSheetConfig(
             value = height,
             onValueChange = callbacks.onHeightChange ?: {},
             error = heightError,
+            isVisible = true
+        ),
+        megapixelsField = sh.hnet.comfychair.ui.components.config.NumericField(
+            value = megapixels,
+            onValueChange = callbacks.onMegapixelsChange ?: {},
+            error = megapixelsError,
             isVisible = true
         ),
         fpsField = sh.hnet.comfychair.ui.components.config.NumericField(

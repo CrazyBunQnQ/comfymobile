@@ -596,6 +596,12 @@ class BackupManager(private val context: Context) {
                         })
                     }
                 }
+                if (json.has("useOriginalRatio")) {
+                    put("useOriginalRatio", json.optBoolean("useOriginalRatio"))
+                }
+                json.optString("referenceAspectRatio").takeIf { it in setOf("2:3", "1:1", "3:2") }?.let {
+                    put("referenceAspectRatio", it)
+                }
             }
         } catch (e: Exception) {
             null

@@ -6,5 +6,7 @@ import android.net.Uri
 data class ReferenceMediaSelection(
     val uri: Uri,
     val displayName: String,
-    val mimeType: String
+    val mimeType: String,
+    val width: Int = 0,
+    val height: Int = 0
 )

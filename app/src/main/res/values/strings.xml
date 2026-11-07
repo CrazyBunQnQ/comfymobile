@@ -753,4 +753,20 @@
     <string name="reference_reselect">Cannot read file. Select it again.</string>
     <string name="reference_not_added">%1$d files were not added (capacity or media type).</string>
     <string name="reference_required">Select at least one compatible reference.</string>
+    <string name="reference_picker_title_images">Select reference images</string>
+    <string name="reference_picker_title_mixed">Select reference images and videos</string>
+    <string name="reference_picker_selected">%1$d selected in tap order · %2$d remaining</string>
+    <string name="reference_picker_add">Add %1$d references</string>
+    <string name="reference_picker_add_media">Add reference media</string>
+    <string name="reference_picker_empty">No photos or videos found</string>
+    <string name="reference_picker_permission_description">Allow access to photos and videos to choose references from your gallery.</string>
+    <string name="reference_picker_permission_denied">Gallery access is not allowed. Grant photo or video access to choose references.</string>
+    <string name="reference_picker_grant_access">Grant access</string>
+    <string name="reference_preview_unavailable">This reference image could not be previewed.</string>
+    <string name="reference_result_empty">Generated result will appear here</string>
+    <string name="reference_picker_remaining">%1$d remaining</string>
+    <string name="reference_media">Reference media</string>
+    <string name="reference_resolution_original">Original ratio</string>
+    <string name="reference_picker_choose_more">Choose more photos or videos</string>
+    <string name="reference_dimensions_unavailable">Unable to read source dimensions; keeping the current canvas.</string>
 </resources>

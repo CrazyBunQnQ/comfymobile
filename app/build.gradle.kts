@@ -13,8 +13,8 @@ android {
         minSdk = 33
         targetSdk = 36
         // CI test builds count up so each one installs as an update
-        versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()?.plus(1000) ?: 40
-        versionName = "v0.8.13"
+        versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()?.plus(1000) ?: 44
+        versionName = "v0.8.17"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

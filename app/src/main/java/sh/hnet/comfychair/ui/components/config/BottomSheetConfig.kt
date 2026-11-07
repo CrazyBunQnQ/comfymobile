@@ -33,7 +33,8 @@ data class ReferenceConfig(
     val enabled: Boolean,
     val onAdd: (ReferenceMediaKind, List<Uri>) -> Unit,
     val onReplace: (ReferenceMediaKind, Int, Uri) -> Unit,
-    val onRemove: (ReferenceMediaKind, Int) -> Unit
+    val onRemove: (ReferenceMediaKind, Int) -> Unit,
+    val onAddMixed: ((List<Uri>) -> Unit)? = null
 )
 
 /**

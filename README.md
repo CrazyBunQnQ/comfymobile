@@ -2,7 +2,7 @@
 
 An unofficial, native Android UI for [ComfyUI](https://github.com/comfyanonymous/ComfyUI).
 
-**Current version**: v0.8.13
+**Current version**: v0.8.17
 
 [<img src="https://raw.githubusercontent.com/rubenpgrady/get-it-on-github/refs/heads/main/get-it-on-github.png"
     alt="Get it on GitHub"
@@ -64,21 +64,23 @@ ComfyMobile is a fork of [ComfyChair](https://github.com/legal-hkr/comfychair) b
   - Live preview during generation
 
 - **Reference to Image (REF2I)** and **Reference to Video (REF2V)**:
-  - Separate generation modes with ordered reference images; REF2V also accepts reference videos
-  - Output width and height are independent of reference media dimensions
-  - Main forms use the same three resolution shortcuts as T2I; REF2V adds 5s / 10s / 15s duration shortcuts. Custom dimensions, duration, FPS, models and reference selection remain in the configuration sheet
+  - Top-right media selection uses a large-thumbnail gallery, not a file list. REF2I accepts multiple images; REF2V accepts images and videos together. Numbered badges preserve tap order, and each media kind is appended to its own reference list in that order
+  - Home screens offer four equal-height, two-line resolution choices: **Original ratio** (default), **2:3**, **1:1**, and **3:2**. Every option shows width × height calculated from the current megapixel budget, which defaults to **1** and is edited only in the configuration sheet. Changing megapixels updates the selected ratio's dimensions; editing width calculates height from the same pixel budget, and editing height calculates width. Dimensions align to the workflow's grid, so area and aspect ratio are approximate
+  - **Source / Preview** switches between the original reference and generated result. REF2I uses its first reference image; REF2V prefers its first reference video, falling back to its first image when no videos remain. Changing the first reference updates the original-ratio canvas without changing selected models
+  - REF2V also offers 5s / 10s / 15s duration shortcuts. Megapixels, custom dimensions, duration, FPS, models and reference-list management remain in the configuration sheet
   - REF2V duration is entered and saved in whole seconds. Existing frame-count preferences are converted using their saved FPS (rounded to the nearest second); changing FPS keeps the chosen seconds unchanged. Submission converts seconds × FPS to the workflow's frame-count input. H3 rounds frames upward to its native temporal grid (at 24 fps: 5s → 124 frames, 10s → 243, 15s → 362), so actual duration can be slightly longer
   - Capacity comes from the workflow's mapped loaders, not a fixed model-specific limit
   - Built-in **Qwen Image 2.1 Reference** provides 16 image slots and an independent latent canvas
   - Qwen REF2I follows the reference graph's QwenImage21Cache and Euler/simple sampling (25 steps, CFG 1). Choose **Qwen3-VL 8B** for conditioning; `pe_i2i` / `pe_t2i` models are prompt enhancers and must not be used as its CLIP encoder
   - Reference-tested Qwen configuration: `qwen_image_2.1_int8_convrot.safetensors` diffusion, `qwen3vl_8b_int8_convrot.safetensors` conditioning encoder (`qwen_image`), and `qwen_image_2.1_vae_bf16.safetensors`. The reference encoder uses resolution 1024; its reference-sized latent is unused, so the output canvas can be landscape even when all references are portrait
   - Updating a bundled workflow does not overwrite saved per-workflow sampling/model choices. When moving from the earlier Qwen template, explicitly set 25 steps / CFG 1 and select the conditioning encoder above
+  - Reference-mode model preferences survive an empty/loading server model cache; automatic resolution updates do not save empty model selections over existing per-workflow choices
   - Built-in **MiniMax H3 Reference Video** provides 9 image slots and 3 native video slots; generated audio is retained, reference audio is not connected
   - H3 prompts identify image references with `<Picture 1>` and video references with `<Video 1>` (one-based numbering per media kind). Image-only, video-only, and mixed selections are supported; unfilled loaders are pruned before submission. Its 512×320 / 5-second / 24-fps / 8-step defaults are a smoke configuration, not a final-quality preset
   - Select compatible diffusion, text encoder and video/image VAE models in the parameter sheet. H3's audio VAE remains a separate loader (`MiniMax/minimax_h3_audio_vae_fp32.safetensors`); duplicate the workflow to change that filename for another server
   - Enable **Show built-in workflows** in app settings if bundled workflows are hidden
   - Reference video files are streamed to ComfyUI's `/upload/image` endpoint with their original media MIME type
-  - Per-server, per-workflow settings retain document URIs, not uploaded filenames or media bytes; unreadable documents must be replaced or removed
+  - Per-server, per-workflow settings retain media URIs, original-ratio preference and megapixel budget, not uploaded filenames or media bytes. Gallery access is requested through Android's photo/video permissions; unreadable or revoked media must be reselected or removed
 
 ### Media
 
